@@ -102,6 +102,8 @@ When multiple evaluators share the same command, it runs once per run. All evalu
 
 This skill adapts [Andrej Karpathy's autoresearch](https://github.com/karpathy/autoresearch) methodology to Claude Code. The original runs autonomous ML training experiments — mutate code, train for 5 minutes, check validation loss, keep or discard. We generalize this to any optimization target with measurable success criteria.
 
+Built on the initial skill-only implementation by [olelehmann100kMRR/autoresearch-skill](https://github.com/olelehmann100kMRR/autoresearch-skill).
+
 ## License
 
 MIT
