@@ -1,0 +1,14 @@
+{
+  "name": "autoresearch",
+  "owner": {
+    "name": "syerad"
+  },
+  "plugins": [
+    {
+      "name": "autoresearch",
+      "description": "Autonomously optimize skill prompts or application code through iterative mutation and evaluation. Based on Karpathy's autoresearch methodology.",
+      "source": "./plugins/autoresearch",
+      "category": "development"
+    }
+  ]
+}
