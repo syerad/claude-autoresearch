@@ -1,5 +1,6 @@
 {
   "name": "autoresearch",
+  "version": "1.0.0",
   "description": "Autonomously optimize skill prompts or application code through iterative mutation and evaluation. Based on Karpathy's autoresearch methodology.",
   "author": {
     "name": "syerad"
