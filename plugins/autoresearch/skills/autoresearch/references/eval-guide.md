@@ -12,6 +12,29 @@ Why: Scales compound variability. If you have 4 evals scored 1-7, your total sco
 
 ---
 
+## calibrating thresholds
+
+Binary evals are blind to movement that doesn't cross the threshold. If the baseline Lighthouse score is 0.62 and your only check is `>= 0.9`, then a mutation that reaches 0.85 scores identically to one that did nothing — and the loop discards it. Repeat that a few times and the run stalls while real progress gets thrown away.
+
+Two fixes:
+
+- **Set thresholds just beyond the current baseline.** Measure first, then check for the next meaningful step (baseline 0.62 → check `>= 0.7`). Tighten the threshold in a follow-up run once it passes consistently.
+- **Stepped thresholds.** Use the same command as multiple evaluators with increasing checks — `>= 0.7`, `>= 0.8`, `>= 0.9`. Each increment flips one more eval, so incremental improvement registers as score movement. Command deduplication means this costs nothing extra: the command still runs once per run.
+
+The fixed-threshold rule below ("Did performance improve?" is a bad eval) still holds — the threshold must be absolute, not relative. Calibration is about *where* you place the absolute line, not about making it relative.
+
+---
+
+## who judges judgment evals
+
+A judgment eval is only as reliable as the judge's independence. The agent that authored a mutation must never grade it — it knows what it changed, why, and wants it kept. Self-graded judgments say "yes" almost every time.
+
+- **Judge blind.** Dispatch a fresh subagent that receives only the artifact (the rendered page, the generated diagram, the command output) and the yes/no question. Never include the diff, the hypothesis, or the changelog.
+- **Ground the judgment in a fresh artifact.** Every run must produce the thing being judged — execute the skill against a fixed test-prompt set, fetch the page, run the binary. A judgment with nothing fresh to inspect measures optimism, not quality.
+- **Prefer command evals when the check is mechanical.** "Is the output identical to the saved baseline?" is a `diff | wc -l` command eval, not a judgment. Reserve judgments for qualities a script can't check.
+
+---
+
 ## good evals vs bad evals
 
 ### Text/copy skills (newsletters, tweets, emails, landing pages)
@@ -62,8 +85,8 @@ Why: Scales compound variability. If you have 4 evals scored 1-7, your total sco
 **Good evals (command evaluators):**
 - `command: "npx lighthouse ... --output=json"` / `extract: ".categories.performance.score"` / `check: ">= 0.9"` (Lighthouse performance above 90)
 - `command: "npx lighthouse ... --output=json"` / `extract: ".audits.largest-contentful-paint.numericValue"` / `check: "< 2500"` (LCP under 2.5s)
-- `command: "du -sb dist | cut -f1"` / `extract: "raw"` / `check: "< 204800"` (bundle under 200KB)
-- `command: "hey -n 100 -c 10 http://localhost:8000/api/endpoint -o json"` / `extract: ".avg_latency_ms"` / `check: "< 100"` (avg response under 100ms)
+- `command: "du -sk dist | cut -f1"` / `extract: "raw"` / `check: "< 200"` (bundle under 200KB — `du -sk` is portable, GNU-only `du -sb` is not)
+- `command: "hey -n 100 -c 10 http://localhost:8000/api/endpoint | awk '/Average:/{print $2*1000}'"` / `extract: "raw"` / `check: "< 100"` (avg response under 100ms — hey has no JSON output; parse its text summary)
 
 **Good evals (judgment, for non-measurable qualities):**
 - "Does the page still render all original visible content sections?" (guards against optimizing away actual content)

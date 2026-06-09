@@ -1,8 +1,13 @@
 {
   "name": "autoresearch",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Autonomously optimize skill prompts or application code through iterative mutation and evaluation. Based on Karpathy's autoresearch methodology.",
   "author": {
-    "name": "syerad"
-  }
+    "name": "syerad",
+    "url": "https://github.com/syerad"
+  },
+  "homepage": "https://github.com/syerad/autoresearch",
+  "repository": "https://github.com/syerad/autoresearch",
+  "license": "MIT",
+  "keywords": ["optimization", "evals", "benchmarking", "self-improvement", "autoresearch"]
 }

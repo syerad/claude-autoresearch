@@ -384,15 +384,15 @@
                        ? exp.score + ' / ' + exp.max_score
                        : exp.score != null ? exp.score : '—';
     var passRateText = exp.pass_rate != null ? exp.pass_rate.toFixed(1) + '%' : '—';
-    var statusKey    = (exp.status || 'running').toLowerCase().replace(/\s+/g, '_');
+    var statusKey    = (exp.status || 'running').toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
     var badgeClass   = 'badge badge-' + statusKey;
     var desc         = exp.description || '';
 
     tr.innerHTML =
-      '<td>' + exp.id + '</td>' +
+      '<td>' + escapeHtml(exp.id) + '</td>' +
       '<td>' + scoreText + '</td>' +
       '<td>' + passRateText + '</td>' +
-      '<td><span class="' + badgeClass + '">' + (exp.status || '') + '</span></td>' +
+      '<td><span class="' + badgeClass + '">' + escapeHtml(exp.status || '') + '</span></td>' +
       '<td class="desc">' + escapeHtml(desc) + '</td>';
 
     expTbody.appendChild(tr);
