@@ -239,6 +239,121 @@
       color: #6a737d;
       font-size: 13px;
     }
+
+    /* Finalist cards (top-n mode) */
+    .finalists-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      padding: 16px;
+    }
+
+    .finalist-card {
+      flex: 1 1 260px;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      padding: 12px 14px;
+      background: #f6f8fa;
+    }
+
+    .finalist-card .variant-id {
+      font-size: 13px;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin-bottom: 8px;
+    }
+
+    .finalist-eval-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      color: #444;
+      padding: 3px 0;
+      border-bottom: 1px solid #ebebeb;
+    }
+
+    .finalist-eval-row:last-child {
+      border-bottom: none;
+    }
+
+    .finalist-eval-score {
+      font-weight: 500;
+      color: #1a1a1a;
+    }
+
+    /* Variant gallery (exploration mode) */
+    .gallery-notice {
+      font-size: 13px;
+      color: #6a737d;
+      margin-bottom: 16px;
+    }
+
+    .variant-gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .variant-card {
+      background: #ffffff;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      padding: 14px 16px;
+    }
+
+    .variant-card .variant-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin-bottom: 2px;
+    }
+
+    .variant-card .variant-id-sub {
+      font-size: 11px;
+      color: #6a737d;
+      margin-bottom: 8px;
+    }
+
+    .variant-card .variant-desc {
+      font-size: 12px;
+      color: #444;
+      margin-bottom: 10px;
+    }
+
+    .variant-dims {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-bottom: 10px;
+    }
+
+    .variant-dim-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+    }
+
+    .variant-dim-key {
+      color: #6a737d;
+    }
+
+    .variant-dim-val {
+      color: #1a1a1a;
+      font-weight: 500;
+    }
+
+    .variant-evals-summary {
+      font-size: 12px;
+      color: #444;
+      border-top: 1px solid #f0f0f0;
+      padding-top: 8px;
+    }
+
+    .variant-evals-summary .pass-good  { color: #22863a; font-weight: 600; }
+    .variant-evals-summary .pass-med   { color: #e36209; font-weight: 600; }
+    .variant-evals-summary .pass-bad   { color: #cb2431; font-weight: 600; }
   </style>
 </head>
 <body>
@@ -277,8 +392,19 @@
     </div>
   </div>
 
-  <!-- Chart + Eval breakdown side by side -->
-  <div class="grid-2">
+  <!-- Variant gallery (exploration mode only) -->
+  <div id="gallery-section" style="display:none;">
+    <div class="card">
+      <div class="card-header" id="gallery-header">Variants</div>
+      <div class="card-body">
+        <div class="gallery-notice" id="gallery-notice" style="display:none;"></div>
+        <div class="variant-gallery" id="variant-gallery"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chart + Eval breakdown side by side (single/top-n modes) -->
+  <div class="grid-2" id="chart-eval-grid">
     <div class="card">
       <div class="card-header">Score Progression</div>
       <div class="card-body">
@@ -310,8 +436,16 @@
     </div>
   </div>
 
+  <!-- Finalists block (top-n mode, complete status only) -->
+  <div id="finalists-section" style="display:none;">
+    <div class="card" style="margin-bottom:24px;">
+      <div class="card-header">Finalists</div>
+      <div class="finalists-grid" id="finalists-grid"></div>
+    </div>
+  </div>
+
   <!-- Experiment table -->
-  <div class="card">
+  <div class="card" id="experiments-card">
     <div class="card-header">Experiments</div>
     <div class="table-wrapper">
       <table id="experiments-table">
@@ -332,99 +466,125 @@
 </div>
 
 <script>
+// Schema (backwards compatible):
+// {
+//   "name": string (required),
+//   "status": "running" | "complete",
+//   "mode": "single" | "top-n" | "exploration" (default "single"),
+//   "current_experiment": number,
+//   "max_iterations": number,
+//   "variants_target": number (exploration mode: the number of distinct variants requested (N)),
+//   "baseline_score": number (pass-rate percent, 0-100),
+//   "best_score": number (pass-rate percent, 0-100),
+//   "experiments": [{ id, score, max_score, pass_rate, status, description }],
+//   "eval_breakdown": [{ name, pass_count, total }],
+//   "finalists": [{ variant_id, eval_scores: { eval_name: { pass_count, total } } }] (top-n mode only),
+//   "variants": [{ id, label, dimensions: {...}, evals_passed, evals_total, description }] (exploration only)
+// }
+
 (function () {
   var data = DATA;
 
-  // --- Status bar ---
-  var statusDot  = document.getElementById('status-dot');
-  var statusText = document.getElementById('status-text');
-  var expLabel   = document.getElementById('experiment-label');
-
-  var statusClass = data.status === 'complete' ? 'complete'
-                  : data.status === 'error'    ? 'error'
-                  : 'running';
-
-  statusDot.className  = 'status-dot ' + statusClass;
-  statusText.className = 'status-text ' + statusClass;
-
-  if (data.status === 'running') {
-    statusText.textContent = 'Running experiment ' + data.current_experiment + '…';
-    expLabel.textContent   = 'Experiment ' + data.current_experiment + ' of ' + data.max_iterations;
-  } else if (data.status === 'complete') {
-    statusText.textContent = 'Complete';
-    expLabel.textContent   = data.current_experiment + ' experiments run';
-  } else {
-    statusText.textContent = data.status || 'Unknown';
+  // --- Utility ---
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 
-  document.getElementById('run-name').textContent = data.name || '';
+  // --- Shared: populate status bar, progress bar ---
+  function renderCommonHeader(data) {
+    var statusDot  = document.getElementById('status-dot');
+    var statusText = document.getElementById('status-text');
+    var expLabel   = document.getElementById('experiment-label');
 
-  var baselineScore = typeof data.baseline_score === 'number' ? data.baseline_score.toFixed(1) + '%' : '—';
-  var bestScore     = typeof data.best_score     === 'number' ? data.best_score.toFixed(1)     + '%' : '—';
-  document.getElementById('baseline-score').textContent = baselineScore;
-  document.getElementById('best-score').textContent     = bestScore;
+    var statusClass = data.status === 'complete' ? 'complete'
+                    : data.status === 'error'    ? 'error'
+                    : 'running';
 
-  // --- Progress bar ---
-  var maxIter = data.max_iterations || 1;
-  var curExp  = data.current_experiment || 0;
-  var pct     = Math.min(100, Math.round((curExp / maxIter) * 100));
-  document.getElementById('progress-fill').style.width = pct + '%';
-  document.getElementById('progress-pct').textContent  = pct + '%';
-  document.getElementById('progress-label-text').textContent =
-    'Experiment ' + curExp + ' of ' + maxIter;
+    statusDot.className  = 'status-dot ' + statusClass;
+    statusText.className = 'status-text ' + statusClass;
 
-  // --- Experiment table ---
-  var experiments = Array.isArray(data.experiments) ? data.experiments : [];
-  var expTbody = document.getElementById('experiments-tbody');
+    if (data.status === 'running') {
+      statusText.textContent = 'Running experiment ' + data.current_experiment + '…';
+      expLabel.textContent   = 'Experiment ' + data.current_experiment + ' of ' + data.max_iterations;
+    } else if (data.status === 'complete') {
+      statusText.textContent = 'Complete';
+      expLabel.textContent   = data.current_experiment + ' experiments run';
+    } else {
+      statusText.textContent = data.status || 'Unknown';
+    }
 
-  experiments.forEach(function (exp) {
-    var tr = document.createElement('tr');
+    document.getElementById('run-name').textContent = data.name || '';
 
-    var scoreText    = (exp.score != null && exp.max_score != null)
-                       ? exp.score + ' / ' + exp.max_score
-                       : exp.score != null ? exp.score : '—';
-    var passRateText = exp.pass_rate != null ? exp.pass_rate.toFixed(1) + '%' : '—';
-    var statusKey    = (exp.status || 'running').toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-    var badgeClass   = 'badge badge-' + statusKey;
-    var desc         = exp.description || '';
+    var baselineScore = typeof data.baseline_score === 'number' ? data.baseline_score.toFixed(1) + '%' : '—';
+    var bestScore     = typeof data.best_score     === 'number' ? data.best_score.toFixed(1)     + '%' : '—';
+    document.getElementById('baseline-score').textContent = baselineScore;
+    document.getElementById('best-score').textContent     = bestScore;
 
-    tr.innerHTML =
-      '<td>' + escapeHtml(exp.id) + '</td>' +
-      '<td>' + scoreText + '</td>' +
-      '<td>' + passRateText + '</td>' +
-      '<td><span class="' + badgeClass + '">' + escapeHtml(exp.status || '') + '</span></td>' +
-      '<td class="desc">' + escapeHtml(desc) + '</td>';
+    var maxIter = data.max_iterations || 1;
+    var curExp  = data.current_experiment || 0;
+    var pct     = Math.min(100, Math.round((curExp / maxIter) * 100));
+    document.getElementById('progress-fill').style.width = pct + '%';
+    document.getElementById('progress-pct').textContent  = pct + '%';
+    document.getElementById('progress-label-text').textContent =
+      'Experiment ' + curExp + ' of ' + maxIter;
+  }
 
-    expTbody.appendChild(tr);
-  });
+  // --- Shared: render experiment table ---
+  function renderExperimentsTable(experiments) {
+    var expTbody = document.getElementById('experiments-tbody');
+    experiments.forEach(function (exp) {
+      var tr = document.createElement('tr');
 
-  // --- Eval breakdown table ---
-  var evalBreakdown = Array.isArray(data.eval_breakdown) ? data.eval_breakdown : [];
-  var evalTbody = document.getElementById('eval-tbody');
+      var scoreText    = (exp.score != null && exp.max_score != null)
+                         ? exp.score + ' / ' + exp.max_score
+                         : exp.score != null ? exp.score : '—';
+      var passRateText = exp.pass_rate != null ? exp.pass_rate.toFixed(1) + '%' : '—';
+      var statusKey    = (exp.status || 'running').toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+      var badgeClass   = 'badge badge-' + statusKey;
+      var desc         = exp.description || '';
 
-  evalBreakdown.forEach(function (ev) {
-    var tr = document.createElement('tr');
-    var total     = ev.total     || 0;
-    var passCount = ev.pass_count != null ? ev.pass_count : 0;
-    var rate      = total > 0 ? (passCount / total) * 100 : 0;
-    var rateText  = rate.toFixed(0) + '%';
-    var fillClass = rate >= 80 ? 'good' : rate >= 50 ? 'medium' : 'bad';
+      tr.innerHTML =
+        '<td>' + escapeHtml(exp.id) + '</td>' +
+        '<td>' + scoreText + '</td>' +
+        '<td>' + passRateText + '</td>' +
+        '<td><span class="' + badgeClass + '">' + escapeHtml(exp.status || '') + '</span></td>' +
+        '<td class="desc">' + escapeHtml(desc) + '</td>';
 
-    tr.innerHTML =
-      '<td>' + escapeHtml(ev.name || '') + '</td>' +
-      '<td>' + passCount + '</td>' +
-      '<td>' + total + '</td>' +
-      '<td class="pass-rate">' + rateText + '</td>' +
-      '<td class="pass-bar-cell">' +
-        '<div class="mini-bar-track">' +
-          '<div class="mini-bar-fill ' + fillClass + '" style="width:' + rate.toFixed(1) + '%"></div>' +
-        '</div>' +
-      '</td>';
+      expTbody.appendChild(tr);
+    });
+  }
 
-    evalTbody.appendChild(tr);
-  });
+  // --- Shared: render eval breakdown table ---
+  function renderEvalBreakdown(evalBreakdown) {
+    var evalTbody = document.getElementById('eval-tbody');
+    evalBreakdown.forEach(function (ev) {
+      var tr = document.createElement('tr');
+      var total     = ev.total     || 0;
+      var passCount = ev.pass_count != null ? ev.pass_count : 0;
+      var rate      = total > 0 ? (passCount / total) * 100 : 0;
+      var rateText  = rate.toFixed(0) + '%';
+      var fillClass = rate >= 80 ? 'good' : rate >= 50 ? 'medium' : 'bad';
 
-  // --- Chart.js line chart ---
+      tr.innerHTML =
+        '<td>' + escapeHtml(ev.name || '') + '</td>' +
+        '<td>' + passCount + '</td>' +
+        '<td>' + total + '</td>' +
+        '<td class="pass-rate">' + rateText + '</td>' +
+        '<td class="pass-bar-cell">' +
+          '<div class="mini-bar-track">' +
+            '<div class="mini-bar-fill ' + fillClass + '" style="width:' + rate.toFixed(1) + '%"></div>' +
+          '</div>' +
+        '</td>';
+
+      evalTbody.appendChild(tr);
+    });
+  }
+
+  // --- Shared: render score chart ---
   var STATUS_COLORS = {
     baseline:   '#0366d6',
     keep:       '#22863a',
@@ -438,84 +598,225 @@
     return STATUS_COLORS[key] || '#6a737d';
   }
 
-  if (typeof Chart !== 'undefined' && experiments.length > 0) {
-    var labels      = experiments.map(function (e) { return 'Exp ' + e.id; });
-    var passRates   = experiments.map(function (e) { return e.pass_rate != null ? e.pass_rate : null; });
-    var pointColors = experiments.map(function (e) { return pointColor(e.status); });
+  function renderScoreChart(experiments) {
+    if (typeof Chart !== 'undefined' && experiments.length > 0) {
+      var labels      = experiments.map(function (e) { return 'Exp ' + e.id; });
+      var passRates   = experiments.map(function (e) { return e.pass_rate != null ? e.pass_rate : null; });
+      var pointColors = experiments.map(function (e) { return pointColor(e.status); });
 
-    var ctx = document.getElementById('score-chart').getContext('2d');
-    new Chart(ctx, {
-      type: 'line',
-      data: {
-        labels: labels,
-        datasets: [{
-          label: 'Pass Rate %',
-          data: passRates,
-          borderColor: '#0366d6',
-          borderWidth: 2,
-          pointBackgroundColor: pointColors,
-          pointBorderColor: pointColors,
-          pointRadius: 5,
-          pointHoverRadius: 6,
-          fill: false,
-          tension: 0.2,
-          spanGaps: true
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: function (ctx) {
-                var exp = experiments[ctx.dataIndex];
-                var lines = [];
-                if (ctx.parsed.y != null) {
-                  lines.push('Pass rate: ' + ctx.parsed.y.toFixed(1) + '%');
+      var ctx = document.getElementById('score-chart').getContext('2d');
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Pass Rate %',
+            data: passRates,
+            borderColor: '#0366d6',
+            borderWidth: 2,
+            pointBackgroundColor: pointColors,
+            pointBorderColor: pointColors,
+            pointRadius: 5,
+            pointHoverRadius: 6,
+            fill: false,
+            tension: 0.2,
+            spanGaps: true
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: function (ctx) {
+                  var exp = experiments[ctx.dataIndex];
+                  var lines = [];
+                  if (ctx.parsed.y != null) {
+                    lines.push('Pass rate: ' + ctx.parsed.y.toFixed(1) + '%');
+                  }
+                  if (exp) {
+                    lines.push('Status: ' + (exp.status || '—'));
+                    if (exp.description) lines.push(exp.description);
+                  }
+                  return lines;
                 }
-                if (exp) {
-                  lines.push('Status: ' + (exp.status || '—'));
-                  if (exp.description) lines.push(exp.description);
-                }
-                return lines;
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { color: '#f0f0f0' },
+              ticks: { color: '#6a737d', font: { size: 12 } }
+            },
+            y: {
+              min: 0,
+              max: 100,
+              grid: { color: '#f0f0f0' },
+              ticks: {
+                color: '#6a737d',
+                font: { size: 12 },
+                callback: function (v) { return v + '%'; }
               }
             }
           }
-        },
-        scales: {
-          x: {
-            grid: { color: '#f0f0f0' },
-            ticks: { color: '#6a737d', font: { size: 12 } }
-          },
-          y: {
-            min: 0,
-            max: 100,
-            grid: { color: '#f0f0f0' },
-            ticks: {
-              color: '#6a737d',
-              font: { size: 12 },
-              callback: function (v) { return v + '%'; }
-            }
-          }
         }
-      }
-    });
-  } else {
-    document.getElementById('score-chart').style.display = 'none';
-    document.getElementById('chart-fallback').style.display = 'flex';
+      });
+    } else {
+      document.getElementById('score-chart').style.display = 'none';
+      document.getElementById('chart-fallback').style.display = 'flex';
+    }
   }
 
-  // --- Utility ---
-  function escapeHtml(str) {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+  // ---------------------------------------------------------------
+  // renderSingleWinner: original behavior, no changes
+  // ---------------------------------------------------------------
+  function renderSingleWinner(data) {
+    var experiments  = Array.isArray(data.experiments)   ? data.experiments   : [];
+    var evalBreakdown = Array.isArray(data.eval_breakdown) ? data.eval_breakdown : [];
+
+    renderExperimentsTable(experiments);
+    renderEvalBreakdown(evalBreakdown);
+    renderScoreChart(experiments);
   }
+
+  // ---------------------------------------------------------------
+  // renderTopN: show chart+eval during run; add finalists on complete
+  // ---------------------------------------------------------------
+  function renderTopN(data) {
+    var experiments   = Array.isArray(data.experiments)   ? data.experiments   : [];
+    var evalBreakdown = Array.isArray(data.eval_breakdown) ? data.eval_breakdown : [];
+
+    renderExperimentsTable(experiments);
+    renderEvalBreakdown(evalBreakdown);
+    renderScoreChart(experiments);
+
+    if (data.status === 'complete' && Array.isArray(data.finalists) && data.finalists.length > 0) {
+      var section = document.getElementById('finalists-section');
+      var grid    = document.getElementById('finalists-grid');
+      section.style.display = '';
+
+      data.finalists.forEach(function (finalist) {
+        var card = document.createElement('div');
+        card.className = 'finalist-card';
+
+        var html = '<div class="variant-id">' + escapeHtml(String(finalist.variant_id)) + '</div>';
+
+        var evalScores = finalist.eval_scores || {};
+        var evalNames  = Object.keys(evalScores);
+        if (evalNames.length > 0) {
+          evalNames.forEach(function (evalName) {
+            var ev         = evalScores[evalName] || {};
+            var passCount  = ev.pass_count != null ? ev.pass_count : 0;
+            var total      = ev.total || 0;
+            var scoreText  = passCount + ' / ' + total;
+            html +=
+              '<div class="finalist-eval-row">' +
+                '<span>' + escapeHtml(evalName) + '</span>' +
+                '<span class="finalist-eval-score">' + scoreText + '</span>' +
+              '</div>';
+          });
+        }
+
+        card.innerHTML = html;
+        grid.appendChild(card);
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // renderExploration: replace score chart with variant gallery
+  // ---------------------------------------------------------------
+  function renderExploration(data) {
+    // Hide the chart/eval grid; show the gallery section instead
+    document.getElementById('chart-eval-grid').style.display = 'none';
+    document.getElementById('gallery-section').style.display = '';
+
+    // Every mode logs experiments — render the table in exploration mode too
+    renderExperimentsTable(Array.isArray(data.experiments) ? data.experiments : []);
+
+    var variants = Array.isArray(data.variants) ? data.variants : [];
+    var gallery  = document.getElementById('variant-gallery');
+
+    if (data.status === 'running') {
+      var expected = data.variants_target || '?';
+      var found    = variants.length;
+      var notice   = document.getElementById('gallery-notice');
+      notice.style.display = '';
+      notice.textContent   = 'Searching for variants (' + found + ' of ' + expected + ' found)…';
+    }
+
+    if (variants.length === 0) {
+      var empty = document.createElement('div');
+      empty.style.cssText = 'color:#6a737d;font-size:13px;padding:8px 0;';
+      empty.textContent   = 'No variants yet.';
+      gallery.appendChild(empty);
+      return;
+    }
+
+    variants.forEach(function (v) {
+      var card = document.createElement('div');
+      card.className = 'variant-card';
+
+      var label = v.label || v.id || '';
+      var id    = v.id    || '';
+      var desc  = v.description || '';
+
+      var html  = '<div class="variant-label">' + escapeHtml(label) + '</div>';
+      if (id !== label) {
+        html += '<div class="variant-id-sub">' + escapeHtml(id) + '</div>';
+      }
+      if (desc) {
+        html += '<div class="variant-desc">' + escapeHtml(desc) + '</div>';
+      }
+
+      var dims     = v.dimensions || {};
+      var dimKeys  = Object.keys(dims);
+      if (dimKeys.length > 0) {
+        html += '<div class="variant-dims">';
+        dimKeys.forEach(function (k) {
+          html +=
+            '<div class="variant-dim-row">' +
+              '<span class="variant-dim-key">' + escapeHtml(k) + '</span>' +
+              '<span class="variant-dim-val">'  + escapeHtml(String(dims[k])) + '</span>' +
+            '</div>';
+        });
+        html += '</div>';
+      }
+
+      var evPassed = v.evals_passed != null ? v.evals_passed : 0;
+      var evTotal  = v.evals_total  != null ? v.evals_total  : 0;
+      var evRate   = evTotal > 0 ? (evPassed / evTotal) * 100 : 0;
+      var evClass  = evRate >= 80 ? 'pass-good' : evRate >= 50 ? 'pass-med' : 'pass-bad';
+      html +=
+        '<div class="variant-evals-summary">' +
+          'Evals: <span class="' + evClass + '">' + evPassed + '</span> / ' + evTotal + ' passed' +
+        '</div>';
+
+      card.innerHTML = html;
+      gallery.appendChild(card);
+    });
+  }
+
+  // ---------------------------------------------------------------
+  // Top-level dispatcher
+  // ---------------------------------------------------------------
+  function render(data) {
+    renderCommonHeader(data);
+
+    var mode = data.mode || 'single';
+    if (mode === 'top-n') {
+      renderTopN(data);
+    } else if (mode === 'exploration') {
+      renderExploration(data);
+    } else {
+      renderSingleWinner(data);
+    }
+  }
+
+  render(data);
 })();
 </script>
 

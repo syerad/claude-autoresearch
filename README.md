@@ -24,9 +24,9 @@ Or inside Claude Code:
 
 ## Quick start
 
-Invoke with `/autoresearch` or say "run autoresearch on this codebase."
+Invoke with `/autoresearch` — the skill opens with a single question: *"What are you trying to improve?"*
 
-The skill asks for 6 fields before starting:
+From your answer it infers a full draft configuration (target files, evals grounded in your examples, guards, rollback mechanism, output mode) and only asks about what it couldn't infer. Engineers who want full control can say "I want to edit directly" and fill in the raw fields:
 
 1. **Target files** — which files the agent can edit
 2. **Evaluators** — command checks (shell command + threshold) and/or judgment checks (binary yes/no questions, graded blind by a fresh subagent)
@@ -34,6 +34,8 @@ The skill asks for 6 fields before starting:
 4. **Timeout** — max seconds per experiment, covering guards plus all evaluation runs
 5. **Max iterations** — experiment budget
 6. **Runs per experiment** — evaluations per mutation (defaults to 5)
+
+Plus an **output mode** — `single-winner` (one optimized result), `top-N` (finalists to pick from), or `exploration` (a portfolio of distinct valid variants, e.g. bull/base/bear forecasts) — and a **rollback mechanism** (git, snapshot directory, API snapshot, or manual-confirm for targets outside version control).
 
 ## How it works
 
