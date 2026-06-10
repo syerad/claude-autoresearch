@@ -6,8 +6,8 @@
     "name": "syerad",
     "url": "https://github.com/syerad"
   },
-  "homepage": "https://github.com/syerad/autoresearch",
-  "repository": "https://github.com/syerad/autoresearch",
+  "homepage": "https://github.com/syerad/claude-autoresearch",
+  "repository": "https://github.com/syerad/claude-autoresearch",
   "license": "MIT",
   "keywords": ["optimization", "evals", "benchmarking", "self-improvement", "autoresearch"]
 }

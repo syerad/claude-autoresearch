@@ -11,14 +11,14 @@ Define target files, evaluators (shell commands with thresholds and/or binary ag
 ### From GitHub
 
 ```
-claude plugins marketplace add syerad/autoresearch
+claude plugins marketplace add syerad/claude-autoresearch
 claude plugins install autoresearch@autoresearch
 ```
 
 Or inside Claude Code:
 
 ```
-/plugin marketplace add syerad/autoresearch
+/plugin marketplace add syerad/claude-autoresearch
 /plugin install autoresearch@autoresearch
 ```
 
