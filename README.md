@@ -1,10 +1,12 @@
 # Autoresearch
 
-Autonomous optimization for Claude Code skills and codebases.
+Tell Claude what "better" means for your files, and it experiments until it gets there — keeping changes that measurably help, automatically undoing the ones that don't.
 
 ## What it does
 
-Define target files, evaluators (shell commands with thresholds and/or binary agent judgments), and guards. The agent runs an iterative mutation/evaluation loop: mutate one thing, check guards, score against evaluators, keep or discard, repeat. Works on anything measurable — skill prompts, Lighthouse scores, API latency, bundle size, Docker container memory, CLI execution time. Based on [Karpathy's autoresearch](https://github.com/karpathy/autoresearch) methodology.
+You point it at one or more files — code, a prompt, marketing copy, a financial model — and describe what "better" means as simple pass/fail checks, like "the page loads in under 2.5 seconds" or "the email ends with one clear ask". Claude then improves the files the way a scientist would: change one thing, test it, keep the change only if the checks score better, undo it if they don't, and write down what happened. You get the improved files plus a full log of every experiment, and your originals are always recoverable.
+
+It works on anything measurable: skill prompts, Lighthouse scores, API latency, bundle size, Docker container memory, CLI execution time, copy, documents. Based on [Karpathy's autoresearch](https://github.com/karpathy/autoresearch) methodology.
 
 ## Installation
 
@@ -35,7 +37,13 @@ From your answer it infers a full draft configuration (target files, evals groun
 5. **Max iterations** — experiment budget
 6. **Runs per experiment** — evaluations per mutation (defaults to 5)
 
-Plus an **output mode** — `single-winner` (one optimized result), `top-N` (finalists to pick from), or `exploration` (a portfolio of distinct valid variants, e.g. bull/base/bear forecasts) — and a **rollback mechanism** (git, snapshot directory, API snapshot, or manual-confirm for targets outside version control).
+Plus an **output mode**, picked to match your goal:
+
+- `single-winner` — one optimized result. Want this when there's a clear target to hit: "make it faster", "score above 90".
+- `top-N` — 2–3 strong finalists, side by side, and you pick. Want this when taste matters and you asked for options: marketing copy, microcopy, email templates.
+- `exploration` — a portfolio of distinct valid variants instead of one winner. Want this when "best" is the wrong question: bull/base/bear forecasts, pricing scenarios, strategy directions.
+
+And a **rollback mechanism** — git for files in a repository, a snapshot directory for binaries or files outside version control, API snapshot for live systems with export/restore, or manual-confirm as a last resort. Targets that can't be undone at all (sent emails, payments) are refused.
 
 ## How it works
 
@@ -43,10 +51,10 @@ Plus an **output mode** — `single-winner` (one optimized result), `top-N` (fin
 2. **Mutate** — make ONE targeted change to the target files
 3. **Guard** — verify nothing is broken (build passes, tests pass, site responds)
 4. **Evaluate** — score against all evaluators. Everything is binary — pass or fail
-5. **Decide** — score improved? Keep. Same or worse? Discard and git reset
-6. **Repeat** — autonomous loop until the user stops it, max iterations are reached, or the score sits at the ceiling for 3 consecutive experiments
+5. **Decide** — better score? Keep. Equal score but strictly simpler? Keep. Anything else — including a one-point blip on noisy checks, which must improve by at least 2 passes — is discarded and rolled back
+6. **Repeat** — autonomous loop until the user stops it, max iterations are reached, or the score is within one pass of perfect and 3 consecutive experiments fail to improve it
 
-All experiments run on a dedicated `autoresearch/[name]` branch — the user's branch is never touched. Failed experiments are rolled back via a per-run tag that advances on every kept improvement. A live HTML dashboard tracks progress.
+Git runs happen on a dedicated `autoresearch/[name]` branch — the user's branch is never touched (non-git targets are protected by their snapshot mechanism instead). Failed experiments are rolled back via a per-run tag that advances on every kept improvement. When the run finishes, the result stays on the run branch and autoresearch offers to squash-merge, open a PR, or leave it for review — it never merges into your branch without asking. A live HTML dashboard tracks progress.
 
 ## Examples
 
@@ -56,10 +64,10 @@ All experiments run on a dedicated `autoresearch/[name]` branch — the user's b
 Target:      header.php, hooks.php
 Evaluator:   npx lighthouse --only-categories=seo (score >= 0.95)
 Guard:       curl -sf http://localhost:8080/
-Timeout:     120s, Max iterations: 50, Runs: 3
+Timeout:     300s, Max iterations: 50, Runs: 3
 ```
 
-Result: 85% → 100% in 6 experiments. Fixes: meta description fallback, descriptive link text replacing generic "here" and "Learn More".
+Result: 67% → 100% in 6 experiments. Fixes: meta description fallback, descriptive link text replacing generic "here" and "Learn More".
 
 ### API response time
 
@@ -67,7 +75,7 @@ Result: 85% → 100% in 6 experiments. Fixes: meta description fallback, descrip
 Target:      routes/search.py, db/queries.py, cache.py
 Evaluators:  hey benchmark (avg < 100ms, p99 < 500ms), memory < 50MB
 Guards:      pytest, import check
-Timeout:     180s, Max iterations: 30, Runs: 3
+Timeout:     240s, Max iterations: 30, Runs: 3
 ```
 
 Result: 33% → 100% in 6 experiments. Fixes: Redis caching, explicit column SELECTs, full-text search, async parallelization.
@@ -78,10 +86,10 @@ Result: 33% → 100% in 6 experiments. Fixes: Redis caching, explicit column SEL
 Target:      ~/.claude/skills/diagram-generator/SKILL.md
 Evaluators:  4 judgment evals (text legibility, colors, layout, no numbering)
 Guard:       echo ok
-Timeout:     60s, Max iterations: 15, Runs: 5
+Timeout:     600s, Max iterations: 15, Runs: 5
 ```
 
-Result: 80% → 97.5% in 5 experiments. Fixes: specific hex codes for colors, anti-numbering rule, worked example.
+Result: 80% → 95% (19/20) in 5 experiments. Fixes: specific hex codes for colors, anti-numbering rule, worked example.
 
 ## Configuration
 
@@ -95,7 +103,7 @@ check:    threshold (">= 0.9", "< 100", "< 5242880")
 
 ### Judgment evaluators
 
-A binary yes/no question the agent answers by inspecting the output.
+A binary yes/no question graded by a fresh subagent that sees only the produced artifact and the question — never the diff, and never graded by the agent that made the change.
 
 ### Command deduplication
 
