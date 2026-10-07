@@ -6,15 +6,27 @@ How to write eval criteria that actually improve your skills instead of giving y
 
 ## the golden rule
 
-Every eval must be a yes/no question. Not a scale. Not a vibe check. Binary.
+Every eval must be a yes/no question. Not a scale. Not a vibe check. Binary. The one exception is a **metric objective** — a raw number a command produces (latency, runtime, size, a Lighthouse score) — which is compared directly against the current best.
 
-Why: Scales compound variability. If you have 4 evals scored 1-7, your total score has massive variance across runs. Binary evals give you a reliable signal.
+Why: Scales compound variability. If you have 4 evals scored 1-7, your total score has massive variance across runs. Binary evals give you a reliable signal. A number a machine measures is not a scale someone invents, and thresholding it throws information away.
+
+---
+
+## objectives and constraints
+
+Each run has exactly one **objective** — what it improves — and any number of **constraints** — what must not break.
+
+- **Metric objective** when the quality is a number. Compare the raw value against the current best, direction-aware, with the measured noise margin. No thresholds, so no sub-threshold blindness.
+- **Pass-count objective** when the quality is a set of yes/no properties: the total passes of the scored checks.
+- **Constraints** are yes/no checks that must pass in every run; one failure discards the candidate. Correctness belongs here: output identical to a golden file, content still present, no banned phrases. Every metric objective needs at least one — optimizing speed is easy if you're allowed to delete features.
+
+A run with no roles assigned — every check scored, no constraints — is a pass-count objective over all of them.
 
 ---
 
 ## calibrating thresholds
 
-Binary evals are blind to movement that doesn't cross the threshold. If the baseline Lighthouse score is 0.62 and your only check is `>= 0.9`, then a mutation that reaches 0.85 scores identically to one that did nothing — and the loop discards it. Repeat that a few times and the run stalls while real progress gets thrown away.
+If the quality is a number, make it a metric objective and this section doesn't apply. Otherwise: binary evals are blind to movement that doesn't cross the threshold. If the baseline Lighthouse score is 0.62 and your only check is `>= 0.9`, then a mutation that reaches 0.85 scores identically to one that did nothing — and the loop discards it. Repeat that a few times and the run stalls while real progress gets thrown away.
 
 Two fixes:
 
@@ -30,8 +42,45 @@ The fixed-threshold rule below ("Did performance improve?" is a bad eval) still 
 A judgment eval is only as reliable as the judge's independence. The agent that authored a mutation must never grade it — it knows what it changed, why, and wants it kept. Self-graded judgments say "yes" almost every time.
 
 - **Judge blind.** Dispatch a fresh subagent that receives only the artifact (the rendered page, the generated diagram, the command output) and the yes/no question. Never include the diff, the hypothesis, or the changelog.
+- **Ask a question the artifact alone can answer.** "Is the progress output still clear?" needs the old output the judge never sees; "Does every progress line show a percentage, a row count, and an ETA?" doesn't. If a judgment needs a reference — a section inventory, a required-fields list — write it into the artifacts directory at setup and give it to the judge alongside the artifact.
+- **Get a reason with every verdict.** The judge answers `PASS` or `FAIL` and one sentence why. The reasons are the best feedback the agent making changes gets about *why* something fails. Blindness is about what the judge sees, not about what happens to its answer.
 - **Ground the judgment in a fresh artifact.** Every run must produce the thing being judged — execute the skill against a fixed test-prompt set, fetch the page, run the binary. A judgment with nothing fresh to inspect measures optimism, not quality.
-- **Prefer command evals when the check is mechanical.** "Is the output identical to the saved baseline?" is a `diff | wc -l` command eval, not a judgment. Reserve judgments for qualities a script can't check.
+- **Prefer command evals when the check is mechanical.** "Is the output identical to the saved baseline?" is a `diff -q … ; exit 0` command check (never `diff … | wc -l`: a missing golden file makes that pass), not a judgment. Reserve judgments for qualities a script can't check.
+
+---
+
+## calibrating judges before the run
+
+A judge that disagrees with the user will optimize the target toward something they don't want, and nobody finds out until the end. Before setup, calibrate every judgment eval on the user's labelled examples:
+
+1. Write down the verdict each example should get on each eval — good examples pass every eval; a bad example fails the evals it was collected to illustrate — and have the user correct the table.
+2. Run 3 blind judges per eval per example.
+3. The eval passes if all 3 verdicts match on every example. Otherwise rewrite the question (show the user the judges' reasons — they usually point at the ambiguity) and calibrate again. After two failed rewrites, drop the eval or hand it to the user.
+
+Then freeze the wording and the judge model. Changing either mid-run means re-running the baseline: scores from before and after are measured with different rulers.
+
+---
+
+## measuring noise
+
+Don't assume how noisy an eval is — measure it. At setup, evaluate the unchanged baseline three times over:
+
+- **A check that flips** on an unchanged target is noisy. As a constraint it would discard good changes at random, so it can't be one: make it deterministic, or move it into the score.
+- **A scored check that always passes** carries no signal. Drop or tighten it.
+- **The spread** of the three baseline totals (pass-count) or means (metric) becomes the noise margin: the minimum improvement that counts. Pass-count runs with any judgment keep a floor of 2.
+
+Measuring once is still not enough for a keep: the candidate that scored highest was partly lucky by selection. Every would-be keep is re-measured alongside the anchor, fresh, and the fresh numbers decide.
+
+---
+
+## keeping evals out of reach
+
+An eval only measures the target while nothing else changes. Agents under pressure to raise a number will, sooner or later, edit the test, the golden file, or the benchmark instead of the code. So:
+
+- Target files and eval inputs never overlap. If a test file is both, the run can't measure it — split it or drop it from the evals.
+- After every mutation commit, the worktree's `git status --porcelain` must match what it was before the edit; anything else touched means the mutation is discarded. After the guards and after evaluation, no tracked file may have changed either — a guard or evaluator that rewrites files would put an unmeasured change under the candidate.
+- Guard and evaluator commands live in checksummed scripts under `commands/`, so a mutation can't change what measures it.
+- Eval inputs outside the worktree (`tasks/`, `examples/`) are checksummed at setup and verified before every evaluation.
 
 ---
 
@@ -89,11 +138,11 @@ A judgment eval is only as reliable as the judge's independence. The agent that 
 - `command: "hey -n 100 -c 10 http://localhost:8000/api/endpoint | awk '/Average:/{print $2*1000}'"` / `extract: "raw"` / `check: "< 100"` (avg response under 100ms — hey has no JSON output; parse its text summary)
 
 **Good evals (judgment, for non-measurable qualities):**
-- "Does the page still render all original visible content sections?" (guards against optimizing away actual content)
-- "Are all interactive elements (buttons, forms, links) still functional?" (guards against breaking UX for speed)
-- "Does the API response still contain all required fields from the original schema?" (guards against returning less data for speed)
+- "Does the page render every section listed in `tasks/sections.md`?" (guards against optimizing away actual content — the inventory is written at setup, so the judge needn't know the original)
+- "Do the buttons, forms, and links listed in `tasks/interactions.md` all respond?" (guards against breaking UX for speed)
+- "Does the API response contain every field listed in `tasks/schema.json`, each with the listed type?" (guards against returning less data for speed)
 
-**Important:** Always pair command evaluators (measuring performance) with at least one judgment evaluator (verifying nothing was broken). Optimizing speed is easy if you're allowed to delete features.
+**Important:** Always pair a performance objective with at least one constraint verifying nothing was broken — a golden-output `diff` where the output is deterministic, a judgment where it isn't. Optimizing speed is easy if you're allowed to delete features.
 
 ### Document skills (proposals, reports, decks)
 
@@ -170,14 +219,15 @@ Fail: Any word is partially hidden, overlapping another element, or cut off at t
 Command evaluators use three fields:
 
 ```
-command:  shell command that produces output
-extract:  how to get the numeric value:
-          - jq-style path for JSON: ".categories.performance.score"
-          - "field N" for whitespace-delimited: "field 1"
-          - "raw" for plain numeric output
-check:    threshold comparison: ">= 0.9", "< 5242880", "< 100"
+command:   shell command that produces output
+extract:   how to get the numeric value:
+           - jq-style path for JSON: ".categories.performance.score"
+           - "field N" for whitespace-delimited: "field 1"
+           - "raw" for plain numeric output
+check:     threshold comparison: ">= 0.9", "< 5242880", "< 100"
+direction: lower | higher — a metric objective only, instead of check
 ```
 
-The agent runs the command, extracts the value, and compares against the threshold. Pass or fail — no scales.
+The agent runs the command, extracts the value, and compares against the threshold. Pass or fail — no scales. For a metric objective, the extracted value itself is the result.
 
 When multiple evaluators share the same command string, the command runs once per run and all evaluators parse the same output.
