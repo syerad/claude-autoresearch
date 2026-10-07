@@ -26,29 +26,30 @@ The autoresearch loop supports three output modes. The front-door proposes one d
 
 **Loop behavior:** unchanged during iteration — same mutate/guard/evaluate/keep-or-discard loop. Difference is only at the end.
 
-**Selection needs per-eval data.** The total score in `results.tsv` is not enough to compute domination. In top-N mode, every evaluated experiment also appends its per-eval pass counts to `autoresearch-[name]/scores.json`:
+**Selection needs per-eval data.** The total score in `results.tsv` is not enough to compute domination. Every evaluated experiment, in every mode, appends its per-eval pass counts, objective value (metric runs), and held-out result to `autoresearch-[name]/scores.json`. For kept experiments these are the fresh re-measured numbers, not the selection-round ones:
 
 ```json
 {
   "experiments": [
     {"id": 1, "status": "keep", "commit": "abc1234",
-     "per_eval": {"Opening specificity": 5, "Single concrete ask": 4, "Length 40-80w": 5, "No banned phrases": 5}}
+     "per_eval": {"Opening specificity": 5, "Single concrete ask": 4},
+     "constraints": {"Length 40-80w": 5, "No banned phrases": 5},
+     "objective": null, "holdout": null}
   ]
 }
 ```
 
 **Selection at end of loop:**
 
-1. Take all kept experiments from `scores.json`.
-2. Filter to the **non-dominated** set: variant A dominates B iff for all evals E, per_eval_A(E) >= per_eval_B(E) and for some eval E*, per_eval_A(E*) > per_eval_B(E*). Keep every variant nothing dominates.
-3. If > N non-dominated variants, rank by total pass-rate and take the top N.
-4. If < N, return what was found.
+1. Take all kept experiments from `scores.json`. Each passed every constraint in force when it was kept; a constraint promoted from a refutation later on was never checked against the earlier ones. Before selection, check every candidate finalist against the constraints added after its keep (switch to it, run the guards, evaluate those constraints) and drop any that fail.
+2. **Pass-count objective:** filter to the **non-dominated** set over the scored checks: variant A dominates B iff for all scored checks E, per_eval_A(E) >= per_eval_B(E) and for some E*, per_eval_A(E*) > per_eval_B(E*). Keep every variant nothing dominates. If > N remain, rank by total pass-rate and take the top N. **Metric objective:** there is one number per experiment, so take the N kept experiments with the best objective value (direction-aware).
+3. If < N, return what was found.
 
 **Output:**
 - Side-by-side diff of the N finalists (rendered in terminal and in dashboard).
 - Per-finalist eval score vector (one row per eval, one column per finalist), straight from `scores.json`.
 - Prompt: "Which one do you want as the working copy?"
-- **Materializing the pick (git):** restore the finalist's target files onto the run branch — `git -C <target repo> checkout <finalist commit> -- <target files>`, commit as `autoresearch: select finalist [K]`, and advance the anchor tag. No history rewriting; later kept commits remain in the branch history. (Snapshot-dir: copy the finalist's `-good` dir over the targets and record a new `-good`.)
+- **Materializing the pick (git):** restore the finalist's target files onto the run branch in the worktree — `git -C <worktree> checkout <finalist commit> -- <target files>`, commit as `autoresearch: select finalist [K]`, and advance the anchor tag. No history rewriting; later kept commits remain in the branch history. (Snapshot-dir: copy the finalist's `-good` dir over the targets and record a new `-good`.)
 
 **Rollback:** same as single-winner during the loop. Selection is post-hoc.
 
@@ -63,7 +64,7 @@ The autoresearch loop supports three output modes. The front-door proposes one d
 - **Every candidate mutates FROM the base anchor** (the baseline state), not from the last kept variant. This keeps variants comparable on the diversity dimensions and prevents drift compounding across variants.
 - A new candidate is kept only if it passes three tests:
   1. All guards pass.
-  2. All evals pass (in exploration mode, evals are hard constraints — not a score).
+  2. All evals pass, in the evaluation and again in one fresh re-evaluation (in exploration mode, evals are hard constraints — not a score).
   3. **Differs from every existing kept variant on at least one diversity dimension.**
 - **On KEEP (git):** tag the commit `autoresearch/[name]/variant-K`, then `reset --hard` back to the base anchor before the next candidate. (Other mechanisms: see rollback-mechanisms.md "Interaction with output modes".)
 - **On DISCARD:** roll back to the base anchor as usual.

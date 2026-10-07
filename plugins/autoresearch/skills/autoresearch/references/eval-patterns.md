@@ -2,6 +2,8 @@
 
 Domain-tagged catalog of known-good eval shapes. The front-door pulls 6–10 candidates from matching tags during setup, filters by whether user-provided examples discriminate, and presents 3–6 finalists.
 
+Numeric command patterns are written with thresholds, as scored checks or constraints. When the number itself is what the run should improve, use the same command as the metric objective instead: drop `check_template` and give a `direction` (see eval-guide.md, "objectives and constraints").
+
 ## How to read this file
 
 Each pattern is a YAML block with fields:

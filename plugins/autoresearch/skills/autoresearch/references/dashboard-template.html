@@ -199,6 +199,7 @@
     .badge-discard    { color: #cb2431; background: #fff5f5; border-color: #ffd1d1; }
     .badge-guard_fail { color: #e36209; background: #fff8f0; border-color: #ffd1a0; }
     .badge-timeout    { color: #e36209; background: #fff8f0; border-color: #ffd1a0; }
+    .badge-refuted    { color: #6f42c1; background: #f8f4ff; border-color: #dcccf5; }
     .badge-running    { color: #6a737d; background: #f6f8fa; border-color: #e0e0e0; }
 
     /* Eval breakdown */
@@ -476,7 +477,9 @@
 //   "variants_target": number (exploration mode: the number of distinct variants requested (N)),
 //   "baseline_score": number (pass-rate percent, 0-100),
 //   "best_score": number (pass-rate percent, 0-100),
-//   "experiments": [{ id, score, max_score, pass_rate, status, description }],
+//   "objective": { name, unit, direction: "lower" | "higher" } (metric runs only),
+//   "baseline_value": number, "best_value": number (metric runs only),
+//   "experiments": [{ id, score, max_score, pass_rate, objective_value (metric runs only), status, description }],
 //   "eval_breakdown": [{ name, pass_count, total }],
 //   "finalists": [{ variant_id, eval_scores: { eval_name: { pass_count, total } } }] (top-n mode only),
 //   "variants": [{ id, label, dimensions: {...}, evals_passed, evals_total, description }] (exploration only)
@@ -486,6 +489,17 @@
   var data = DATA;
 
   // --- Utility ---
+  // Metric runs carry a raw objective value instead of a pass rate.
+  // A pass-count objective block (kind: "pass-count") keeps the pass-rate view.
+  var objective = data.objective && typeof data.objective === 'object' &&
+                  data.objective.kind !== 'pass-count' ? data.objective : null;
+
+  function formatValue(v) {
+    if (typeof v !== 'number') return '—';
+    var unit = objective && objective.unit ? ' ' + objective.unit : '';
+    return String(Number(v.toPrecision(4))) + unit;
+  }
+
   function escapeHtml(str) {
     return String(str)
       .replace(/&/g, '&amp;')
@@ -519,8 +533,10 @@
 
     document.getElementById('run-name').textContent = data.name || '';
 
-    var baselineScore = typeof data.baseline_score === 'number' ? data.baseline_score.toFixed(1) + '%' : '—';
-    var bestScore     = typeof data.best_score     === 'number' ? data.best_score.toFixed(1)     + '%' : '—';
+    var baselineScore = objective ? formatValue(data.baseline_value)
+                      : typeof data.baseline_score === 'number' ? data.baseline_score.toFixed(1) + '%' : '—';
+    var bestScore     = objective ? formatValue(data.best_value)
+                      : typeof data.best_score     === 'number' ? data.best_score.toFixed(1)     + '%' : '—';
     document.getElementById('baseline-score').textContent = baselineScore;
     document.getElementById('best-score').textContent     = bestScore;
 
@@ -539,7 +555,8 @@
     experiments.forEach(function (exp) {
       var tr = document.createElement('tr');
 
-      var scoreText    = (exp.score != null && exp.max_score != null)
+      var scoreText    = objective ? escapeHtml(formatValue(exp.objective_value))
+                       : (exp.score != null && exp.max_score != null)
                          ? exp.score + ' / ' + exp.max_score
                          : exp.score != null ? exp.score : '—';
       var passRateText = exp.pass_rate != null ? exp.pass_rate.toFixed(1) + '%' : '—';
@@ -590,7 +607,8 @@
     keep:       '#22863a',
     discard:    '#cb2431',
     guard_fail: '#e36209',
-    timeout:    '#e36209'
+    timeout:    '#e36209',
+    refuted:    '#6f42c1'
   };
 
   function pointColor(status) {
@@ -601,7 +619,14 @@
   function renderScoreChart(experiments) {
     if (typeof Chart !== 'undefined' && experiments.length > 0) {
       var labels      = experiments.map(function (e) { return 'Exp ' + e.id; });
-      var passRates   = experiments.map(function (e) { return e.pass_rate != null ? e.pass_rate : null; });
+      var passRates   = experiments.map(function (e) {
+        if (objective) return typeof e.objective_value === 'number' ? e.objective_value : null;
+        return e.pass_rate != null ? e.pass_rate : null;
+      });
+      var seriesLabel = objective
+        ? (objective.name || 'Objective') + (objective.unit ? ' (' + objective.unit + ')' : '') +
+          (objective.direction === 'lower' ? ', lower is better' : objective.direction === 'higher' ? ', higher is better' : '')
+        : 'Pass Rate %';
       var pointColors = experiments.map(function (e) { return pointColor(e.status); });
 
       var ctx = document.getElementById('score-chart').getContext('2d');
@@ -610,7 +635,7 @@
         data: {
           labels: labels,
           datasets: [{
-            label: 'Pass Rate %',
+            label: seriesLabel,
             data: passRates,
             borderColor: '#0366d6',
             borderWidth: 2,
@@ -635,7 +660,8 @@
                   var exp = experiments[ctx.dataIndex];
                   var lines = [];
                   if (ctx.parsed.y != null) {
-                    lines.push('Pass rate: ' + ctx.parsed.y.toFixed(1) + '%');
+                    lines.push(objective ? seriesLabel + ': ' + formatValue(ctx.parsed.y)
+                                         : 'Pass rate: ' + ctx.parsed.y.toFixed(1) + '%');
                   }
                   if (exp) {
                     lines.push('Status: ' + (exp.status || '—'));
@@ -651,7 +677,10 @@
               grid: { color: '#f0f0f0' },
               ticks: { color: '#6a737d', font: { size: 12 } }
             },
-            y: {
+            y: objective ? {
+              grid: { color: '#f0f0f0' },
+              ticks: { color: '#6a737d', font: { size: 12 } }
+            } : {
               min: 0,
               max: 100,
               grid: { color: '#f0f0f0' },

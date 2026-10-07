@@ -31,10 +31,11 @@ The loop in SKILL.md is written mechanism-generically. Each step maps to:
 
 | Loop operation | git | snapshot-dir | API | manual-confirm |
 |---|---|---|---|---|
-| Verify anchor (step 3) | tag `autoresearch/[name]/good` == HEAD | latest `-good` dir matches targets | last `keep` export matches live state | last confirmed log entry |
-| Record attempt (step 4) | commit target files (`--no-verify`) | copy targets to `iterations/NNNN-attempt/` | apply change via API | user applies change, agent logs it |
-| Roll back (steps 5/7) | `git reset --hard autoresearch/[name]/good` | copy latest `-good` dir over targets | restore endpoint with kept `export_id` | tell user what to revert, wait for ack |
-| Advance anchor (step 7 KEEP) | `git tag -f autoresearch/[name]/good` | copy targets to `iterations/NNNN-good/` | append `keep` entry with new `export_id` | log `keep` entry, user ack |
+| Verify anchor (step 3) | tag `autoresearch/[name]/good` == worktree HEAD | latest `-good` dir matches targets | last `keep` export matches live state | last confirmed log entry |
+| Record attempt (step 4) | commit target files in the worktree (`--no-verify`) | copy targets to `iterations/NNNN-attempt/` | apply change via API | user applies change, agent logs it |
+| Roll back (steps 5/7) | on the run branch: `git -C <worktree> reset --hard autoresearch/[name]/good` | copy latest `-good` dir over targets | restore endpoint with kept `export_id` | tell user what to revert, wait for ack |
+| Advance anchor (step 7 KEEP) | `git -C <worktree> tag -f autoresearch/[name]/good autoresearch/[name]` — name the branch, never rely on HEAD | copy targets to `iterations/NNNN-good/` | append `keep` entry with new `export_id` | log `keep` entry, user ack |
+| Switch between anchor and candidate (step 7 re-measure, refutation) | to anchor: `git -C <worktree> checkout --detach autoresearch/[name]/good`; back: `git -C <worktree> checkout autoresearch/[name]` — always switch back before rolling back or keeping: a `reset --hard` or `tag -f` on the detached anchor would leave the discarded commit on the run branch, or tag the old state as the new keep. Run the guards after every switch so the build matches the state | copy the latest `-good` dir / `iterations/NNNN-attempt/` over the targets | export the candidate first, then restore the kept `export_id` / the candidate export | tell the user which state to switch to, wait for their ack |
 
 **The anchor lives forward.** After every KEEP, advance the anchor immediately — the tag, the latest `-good` dir, the most recent kept `export_id`, the last confirmed log entry. Never depend on `HEAD~1` or similar relative references, and never leave the anchor pointing at a pre-keep state: if the run stops right after a keep, a stale anchor makes recovery silently destroy the best result.
 
@@ -42,25 +43,37 @@ The loop in SKILL.md is written mechanism-generically. Each step maps to:
 
 ## Mechanism 1: git (default for code and text-serializable targets)
 
-**Storage:** the run branch `autoresearch/[name]` plus the tag `autoresearch/[name]/good`, advanced to HEAD after each kept experiment. Both are namespaced per run so repeated or concurrent runs cannot clobber each other.
+**Storage:** a git worktree — a second checkout of the same repo — on the run branch `autoresearch/[name]`, plus the tag `autoresearch/[name]/good`, advanced to the worktree's HEAD after each kept experiment. All three are namespaced per run so repeated or concurrent runs cannot clobber each other. The worktree path defaults to a sibling of the repo, `<parent of target repo>/<repo dir name>-autoresearch-[name]`, so test runners and type checkers in the user's checkout never see the copy. The paths, branch, tag, and the commit and branch the run started from are recorded in `config.yaml`.
 
-**Rollback operation:** `git -C <target repo> reset --hard autoresearch/[name]/good`.
+**Why a worktree:** the user's checkout is never switched, reset, or committed to. They can keep working — including on uncommitted changes — while the run mutates, builds, and resets its own copy.
 
-**Resume after crash:** run `git -C <target repo> status`; if target files are dirty, reset to the tag. The tag advances on every keep, so this never loses kept work.
+**Rollback operation:** `git -C <worktree> reset --hard autoresearch/[name]/good`.
+
+**Resume after crash:** if the worktree directory is missing, clear only its entry with `git -C <target repo> worktree remove <worktree>` — not `worktree prune`, which acts on every worktree of the repo, the user's included — re-attach it with `git -C <target repo> worktree add <worktree> autoresearch/[name]`, and re-run `worktree_setup`. If it is on a detached HEAD (a crash mid re-measurement), `git -C <worktree> checkout autoresearch/[name]`. If `scores.json`'s latest keep names a commit ahead of the tag (`git -C <worktree> merge-base --is-ancestor <tag> <commit>`), the crash came between logging and tagging: finish the keep and move the tag to that commit. Never move the tag backwards — if it is ahead of every logged keep, stop and ask the user. Then if `git -C <worktree> rev-parse HEAD` differs from `git -C <worktree> rev-parse autoresearch/[name]/good`, or `git -C <worktree> status --porcelain --untracked-files=no` is non-empty, reset to the tag. Check both: an interrupted experiment's mutation is usually already committed, so a clean working tree does not mean the worktree is at the anchor. The tag advances on every keep, so this never loses kept work.
 
 **Pre-flight checks:**
 
-1. **Resolve the target repo.** For each target file, `git -C <dir-of-target> rev-parse --show-toplevel`. ALL target files must resolve to the SAME repository — call it the target repo, and run every git command as `git -C <target repo>`. If targets span repos or only some are inside one, fall through to snapshot-dir (or ask the user to split the run). Never run git commands against whatever repo happens to enclose the cwd.
-2. `git -C <target repo> status --porcelain` returns empty (no uncommitted changes). If not → abort with:
-   > "Uncommitted changes detected. Please commit or stash before running autoresearch. I will NOT auto-commit your work."
-3. Not on a detached HEAD — the run needs a branch to return to.
-4. No collision: the tag `autoresearch/[name]/good`, the branch `autoresearch/[name]`, or the directory `autoresearch-[name]/` already existing means a previous run by that name — offer resume or a new name.
+1. **Resolve the target repo.** For each target file, `git -C <dir-of-target> rev-parse --show-toplevel`. ALL target files must resolve to the SAME repository — call it the target repo. Repo-level commands (`worktree add`/`remove`, the exclude file) run as `git -C <target repo>`; everything inside the run runs as `git -C <worktree>`. If targets span repos or only some are inside one, fall through to snapshot-dir (or ask the user to split the run). Never run git commands against whatever repo happens to enclose the cwd.
+2. The target files have no uncommitted changes: `git -C <target repo> status --porcelain -- <each target path>` returns empty. The worktree starts from the last commit, so uncommitted edits to a target would silently not be part of the run. If not empty → abort with:
+   > "Your target files have uncommitted changes. Please commit or stash them before running autoresearch — the run starts from your last commit. I will NOT auto-commit your work."
 
-**Setup actions (after pre-flight passes):** create and check out the run branch `autoresearch/[name]`; add `autoresearch-*/` to `.gitignore` and commit that change if it changed; tag HEAD as `autoresearch/[name]/good`. Mutation commits stage ONLY the declared target files and use `--no-verify`.
+   Uncommitted or untracked files outside the targets do not block the run. Tell the user they are not part of it, and that guards which depend on them will fail in the worktree.
+3. No collision: the tag `autoresearch/[name]/good`, the branch `autoresearch/[name]`, the worktree path, or the directory `autoresearch-[name]/` already existing means a previous run by that name — offer resume or a new name.
+
+**Setup actions (after pre-flight passes):**
+
+- `git -C <target repo> worktree add -b autoresearch/[name] <worktree> HEAD`. This works from a detached HEAD too; record the user's branch (or the commit, if detached) as the run's `base` in `config.yaml`.
+- Prepare the worktree: it holds tracked files only, so run the project's install step in it (`npm ci`, `uv sync`, …) and record it as `worktree_setup` in `config.yaml`. Never copy secret files (`.env*`) in without asking.
+- Add `autoresearch-*/` to the repo's local exclude file if absent: the path is `git -C <target repo> rev-parse --path-format=absolute --git-path info/exclude` (without `--path-format=absolute` it is relative to the repo, not to your working directory); `mkdir -p` its directory first. This keeps the artifacts directory out of the user's `git status` without committing anything to any branch.
+- `git -C <worktree> tag autoresearch/[name]/good autoresearch/[name]`.
+
+Mutation commits happen in the worktree, stage ONLY the declared target files, and use `--no-verify`.
+
+**Cleanup (at delivery):** once the user has chosen what to do with the run branch, `git -C <target repo> worktree remove <worktree>`. The branch keeps every commit. Leave the worktree in place if the user wants to inspect it first. If `remove` refuses because of untracked or modified files, never add `--force` — it would delete anything the user changed there; show `git -C <worktree> status` and ask.
 
 **User-facing copy (first-mention glossed):**
 
-> *"Rollback: git. I'll work on a separate branch called `autoresearch/[name]` — your branch is never touched. If a change makes your target worse, I'll run `git reset --hard` to throw it away. Your latest good state is saved as a git tag so we can always return to it, and your original files are backed up before anything starts."*
+> *"Rollback: git. I'll work in a separate copy of your repo (a git worktree at `<worktree>`) on a branch called `autoresearch/[name]` — your checkout and branch are never touched, so you can keep working (just don't run `git clean -x` there meanwhile — it would delete the run's artifacts folder). If a change makes your target worse, I'll run `git reset --hard` in that copy to throw it away. Your latest good state is saved as a git tag so we can always return to it, and your original files are backed up before anything starts."*
 
 ---
 
@@ -194,7 +207,7 @@ When the agent detects one of these, it must output:
 
 - **single-winner, top-N:** one rollback anchor per run. All mechanisms work unmodified. (Top-N finalists are materialized from the run's kept history at delivery — see output-modes.md.)
 - **exploration:** every candidate mutates FROM the base anchor, and each kept variant gets its own anchor alongside it:
-  - git → tags: `autoresearch/[name]/variant-1`, `autoresearch/[name]/variant-2`, … On KEEP, tag the variant, then `reset --hard` back to the base anchor (`autoresearch/[name]/good`, which stays on the baseline) before the next candidate.
+  - git → tags: `autoresearch/[name]/variant-1`, `autoresearch/[name]/variant-2`, … On KEEP, tag the variant at the branch tip (`git -C <worktree> tag autoresearch/[name]/variant-K autoresearch/[name]`), then `git -C <worktree> reset --hard` back to the base anchor (`autoresearch/[name]/good`, which stays on the baseline) before the next candidate.
   - snapshot-dir → parallel `iterations/variant-N-good/` directories; targets are restored from `0000-good/` before the next candidate.
   - API → per-variant entries under `variants` in `api-state.json`; restore the baseline export before the next candidate.
   - manual-confirm → per-variant sections in `manual-snapshots.md`.

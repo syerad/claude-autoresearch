@@ -31,11 +31,12 @@ Invoke with `/autoresearch` — the skill opens with a single question: *"What a
 From your answer it infers a full draft configuration (target files, evals grounded in your examples, guards, rollback mechanism, output mode) and only asks about what it couldn't infer. Engineers who want full control can say "I want to edit directly" and fill in the raw fields:
 
 1. **Target files** — which files the agent can edit
-2. **Evaluators** — command checks (shell command + threshold) and/or judgment checks (binary yes/no questions, graded blind by a fresh subagent)
+2. **Evaluators** — command checks (shell command + threshold) and/or judgment checks (binary yes/no questions, graded blind by a fresh subagent). One **objective** is what the run improves — a raw number like runtime or bundle size, or the pass count of yes/no checks — and **constraints** are checks that must pass every time, like "output identical to the golden file"
 3. **Guards** — commands that must pass after every mutation (at least one required)
 4. **Timeout** — max seconds per experiment, covering guards plus all evaluation runs
 5. **Max iterations** — experiment budget
 6. **Runs per experiment** — evaluations per mutation (defaults to 5)
+7. **Held-out set** — for prompts and benchmarks judged over a set of inputs, about a third are kept back where the agent making changes never sees them, to catch overfitting
 
 Plus an **output mode**, picked to match your goal:
 
@@ -43,18 +44,20 @@ Plus an **output mode**, picked to match your goal:
 - `top-N` — 2–3 strong finalists, side by side, and you pick. Want this when taste matters and you asked for options: marketing copy, microcopy, email templates.
 - `exploration` — a portfolio of distinct valid variants instead of one winner. Want this when "best" is the wrong question: bull/base/bear forecasts, pricing scenarios, strategy directions.
 
+Before the run starts, judgment evals are calibrated on your own good and bad examples — an eval that disagrees with you is rewritten before it can steer the run — and a refuter attacks the eval set, looking for edits that would raise the score while making the target worse. At the end, the refuter attacks the final result once more before anything is offered for merge.
+
 And a **rollback mechanism** — git for files in a repository, a snapshot directory for binaries or files outside version control, API snapshot for live systems with export/restore, or manual-confirm as a last resort. Targets that can't be undone at all (sent emails, payments) are refused.
 
 ## How it works
 
-1. **Baseline** — measure current state before changing anything
-2. **Mutate** — make ONE targeted change to the target files
+1. **Baseline** — measure the current state three times before changing anything; the spread sets the noise margin, the smallest improvement that counts
+2. **Mutate** — make ONE targeted change to the target files, and nothing else: a mutation that touches a test, a golden file, or any other non-target file is thrown out
 3. **Guard** — verify nothing is broken (build passes, tests pass, site responds)
-4. **Evaluate** — score against all evaluators. Everything is binary — pass or fail
-5. **Decide** — better score? Keep. Equal score but strictly simpler? Keep. Anything else — including a one-point blip on noisy checks, which must improve by at least 2 passes — is discarded and rolled back
-6. **Repeat** — autonomous loop until the user stops it, max iterations are reached, or the score is within one pass of perfect and 3 consecutive experiments fail to improve it
+4. **Evaluate** — every constraint must pass; the objective is scored against the current best
+5. **Decide** — better by at least the noise margin, or equal but strictly simpler? Then re-measure the candidate and the current best side by side, fresh, check the held-out set, and let a refuter try to break the change — a change is kept only if the win holds and no counterexample reproduces. A counterexample that does reproduce becomes a new constraint for the rest of the run. Anything else is discarded and rolled back
+6. **Repeat** — autonomous loop until the user stops it, max iterations are reached, a numeric target is met, or the score is within one pass of perfect and 3 consecutive experiments fail to improve it
 
-Git runs happen on a dedicated `autoresearch/[name]` branch — the user's branch is never touched (non-git targets are protected by their snapshot mechanism instead). Failed experiments are rolled back via a per-run tag that advances on every kept improvement. When the run finishes, the result stays on the run branch and autoresearch offers to squash-merge, open a PR, or leave it for review — it never merges into your branch without asking. A live HTML dashboard tracks progress.
+Git runs happen in a separate git worktree on a dedicated `autoresearch/[name]` branch — your checkout and branch are never touched, so you can keep working while it runs (non-git targets are protected by their snapshot mechanism instead). Every setting is saved to `config.yaml` in the run's artifacts directory, so a crashed or interrupted run resumes exactly where it left off. Failed experiments are rolled back via a per-run tag that advances on every kept improvement. When the run finishes, the result stays on the run branch and autoresearch offers to squash-merge, open a PR, or leave it for review — it never merges into your branch without asking. A live HTML dashboard tracks progress.
 
 ## Examples
 
@@ -96,14 +99,15 @@ Result: 80% → 95% (19/20) in 5 experiments. Fixes: specific hex codes for colo
 ### Command evaluators
 
 ```
-command:  shell command to run
-extract:  how to get the value (jq path for JSON, "field N" for delimited, "raw" for plain number)
-check:    threshold (">= 0.9", "< 100", "< 5242880")
+command:   shell command to run
+extract:   how to get the value (jq path for JSON, "field N" for delimited, "raw" for plain number)
+check:     threshold (">= 0.9", "< 100", "< 5242880")
+direction: lower | higher — instead of check, for a numeric objective
 ```
 
 ### Judgment evaluators
 
-A binary yes/no question graded by a fresh subagent that sees only the produced artifact and the question — never the diff, and never graded by the agent that made the change.
+A binary yes/no question graded by a fresh subagent that sees only the produced artifact and the question — never the diff, and never graded by the agent that made the change. The judge returns pass or fail plus one sentence why, and the reasons tell the next experiment what to fix.
 
 ### Command deduplication
 
