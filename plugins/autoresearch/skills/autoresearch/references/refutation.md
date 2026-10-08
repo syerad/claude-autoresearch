@@ -17,10 +17,10 @@ The brief, per mode:
 | Mode name | ✓ | ✓ | ✓ |
 | The goal — the `goal` paragraph in `config.yaml` | ✓ | ✓ | ✓ |
 | Objective, constraints, and guards, verbatim from `config.yaml` | ✓ | ✓ | ✓ |
-| Absolute paths of the target files in the worktree | ✓ | ✓ | ✓ |
+| Absolute path of the worktree root, and of the target files in it | ✓ | ✓ | ✓ |
 | Absolute path of `tasks/` (dev inputs), if any | ✓ | ✓ | ✓ |
 | Diversity dimensions, marked as intended differences (exploration) | — | ✓ | ✓ |
-| Diff | — | anchor → candidate: `git -C <worktree> diff autoresearch/[name]/good autoresearch/[name]` | run base → final: `git -C <worktree> diff <base commit> autoresearch/[name]` |
+| Diff — written to a file under `diffs/` in the artifacts directory; the brief gives its path (the refuter has no shell) | — | anchor → candidate: `git -C <worktree> diff autoresearch/[name]/good autoresearch/[name]` | run base → final: `git -C <worktree> diff <base commit> autoresearch/[name]` |
 | Reproducer timeout (the experiment timeout) | — | ✓ | ✓ |
 
 Never put in a brief: the hypothesis, the changelog, `results.tsv`, scores, judge verdicts or reasons, or anything from `holdout/`. A refuter that knows why a change was made argues with the reasoning instead of attacking the result; one that sees held-out data leaks it into promoted constraints.
@@ -45,7 +45,7 @@ Runs after re-measurement and the held-out check, before KEEP — so only on can
 
 1. Dispatch in `gate` mode.
 2. `STATUS: HELD` → KEEP.
-3. `STATUS: COUNTEREXAMPLES` → **safety-review every reproducer before running it.** It runs unattended in a checkout that shares refs, tags, and stashes with the user's repo. Reject it as not reproduced, without running it, if it invokes `git`; writes anywhere but `/tmp` or `/dev/null`; references `holdout/` or `autoresearch-*/holdout` in any form; runs `kill`, `pkill`, or `docker stop|rm`; makes `curl -X POST|PUT|DELETE` requests or uses the network beyond what the run's own evaluators use; uses `sudo`; or references paths outside the worktree, `/tmp`, and the artifacts directory — or if setup step 2 would have refused it.
+3. `STATUS: COUNTEREXAMPLES` → **safety-review every reproducer before running it.** It runs unattended in a checkout that shares refs, tags, and stashes with the user's repo. Reject it as not reproduced, without running it, if it invokes `git`; writes anywhere but `/tmp` or `/dev/null`; references `holdout/` or `autoresearch-*/holdout` in any form, or globs over `autoresearch-*/` or its parent; uses `rm`, `mv`, `eval`, or `bash -c`; runs `kill`, `pkill`, or `docker stop|rm`; makes `curl -X POST|PUT|DELETE` requests or uses the network beyond what the run's own evaluators use; uses `sudo`; or references any path outside the worktree and `/tmp` except the run's own `commands/` and `refutations/` directories — or if setup step 2 would have refused it. This is a screen, not a sandbox: it catches the careless case, and the checksums on `commands/` and the tracked-files check after each run catch what it misses.
 4. **Reproduce each survivor** 3 times against the candidate and 3 times against the anchor, each run with a fresh experiment-sized timeout, switching state as for re-measurement. After every switch confirm it worked — `git -C <worktree> rev-parse HEAD` equals the intended commit — before running anything, then re-run the guards, so the binary or build being tested is the version you think it is ([rollback-mechanisms.md](rollback-mechanisms.md)):
    - **Command reproducer:** write it to `commands/` and run it as `timeout <remaining>s bash <script>` from the worktree root, with `<remaining>` the fresh experiment-sized timeout. Before each run, note `git -C <worktree> status --porcelain`; after it, restore tracked files (`git -C <worktree> reset --hard <commit under test>`) and delete only the files that weren't there before — build outputs the guards made stay.
    - **Input + question:** each run, a fresh subagent runs the target on the input in the current state, then 3 blind judges get only the output and the question. An output fails when at least 2 of the 3 answer "no".

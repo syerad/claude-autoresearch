@@ -44,7 +44,7 @@ Plus an **output mode**, picked to match your goal:
 - `top-N` — 2–3 strong finalists, side by side, and you pick. Want this when taste matters and you asked for options: marketing copy, microcopy, email templates.
 - `exploration` — a portfolio of distinct valid variants instead of one winner. Want this when "best" is the wrong question: bull/base/bear forecasts, pricing scenarios, strategy directions.
 
-Before the run starts, judgment evals are calibrated on your own good and bad examples — an eval that disagrees with you is rewritten before it can steer the run — and a refuter attacks the eval set, looking for edits that would raise the score while making the target worse. At the end, the refuter attacks the final result once more before anything is offered for merge.
+Target files must be tracked in git and free of uncommitted changes; everything else in your checkout can stay as it is. Before the run starts, judgment evals are calibrated on your own good and bad examples — an eval that disagrees with you is rewritten before it can steer the run — and a refuter attacks the eval set, looking for edits that would raise the score while making the target worse. At the end, the refuter attacks the final result once more before anything is offered for merge.
 
 And a **rollback mechanism** — git for files in a repository, a snapshot directory for binaries or files outside version control, API snapshot for live systems with export/restore, or manual-confirm as a last resort. Targets that can't be undone at all (sent emails, payments) are refused.
 

@@ -13,7 +13,7 @@ The brief names your mode and gives you absolute paths. Read files by absolute p
 - **`gate`** — during a run. You get the goal, the objective and constraints, the diff from the current best to a candidate, and the path of a checkout holding the candidate. Find inputs on which the candidate does the job worse than the current best.
 - **`final`** — at the end of a run. Same as `gate`, with the diff from the run's starting point to its final state.
 
-You do not get, and must not ask for, the reasoning behind a change, the changelog, scores, or anything about held-out data. Never open anything under an `autoresearch-*/` directory except the `tasks/` path the brief gives you. Judge what is in front of you.
+You do not get, and must not ask for, the reasoning behind a change, the changelog, scores, or anything about held-out data. Never open anything under an `autoresearch-*/` directory except the `tasks/` and diff paths the brief gives you. Never mention a `holdout/` path or its contents in your findings — if you come across one, ignore it. Judge what is in front of you.
 
 In exploration runs the brief lists diversity dimensions: a variant differing along them is intended. Only report failures of properties every variant must keep.
 
