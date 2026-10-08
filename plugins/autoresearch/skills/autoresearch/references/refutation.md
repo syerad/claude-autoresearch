@@ -65,7 +65,7 @@ Runs after re-measurement and the held-out check, before KEEP — so only on can
    - add its files to `eval_inputs_sha256`.
 
    It needs no re-baseline: it passed all 3 runs on the anchor, which is the stability check every constraint needs, and constraints never add to the score. Promote it only if a run fits within the experiment timeout; otherwise leave it as a changelog note, since a constraint that times out would discard every later candidate. Bump `revision` and continue.
-8. Log the `results.tsv` row with status `refuted` and the candidate's re-measured score; the description names the claim ("… — refuted: drops the Pricing section on vendor comparisons").
+8. Log the `results.tsv` row with status `refuted` and the candidate's re-measured score; the description names the claim ("… — refuted: drops the Pricing section on vendor comparisons"). Keep the description free of tabs and newlines, as in the changelog — it goes into `results.tsv`.
 
 Cost: one dispatch plus at most 3 reproducers × 2 states × 3 runs, per would-be keep only.
 

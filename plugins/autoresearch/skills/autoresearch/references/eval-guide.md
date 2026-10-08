@@ -45,7 +45,7 @@ A judgment eval is only as reliable as the judge's independence. The agent that 
 - **Ask a question the artifact alone can answer.** "Is the progress output still clear?" needs the old output the judge never sees; "Does every progress line show a percentage, a row count, and an ETA?" doesn't. If a judgment needs a reference — a section inventory, a required-fields list — write it into the artifacts directory at setup and give it to the judge alongside the artifact.
 - **Get a reason with every verdict.** The judge answers `PASS` or `FAIL` and one sentence why. The reasons are the best feedback the agent making changes gets about *why* something fails — give it the dev-task reasons, never the held-out ones. Blindness is about what the judge sees, not about what happens to its answer.
 - **Ground the judgment in a fresh artifact.** Every run must produce the thing being judged — execute the skill against a fixed test-prompt set, fetch the page, run the binary. A judgment with nothing fresh to inspect measures optimism, not quality.
-- **Prefer command evals when the check is mechanical.** "Is the output identical to the saved baseline?" is a `diff -q … ; exit 0` command check (never `diff … | wc -l`: a missing golden file makes that pass), not a judgment. Reserve judgments for qualities a script can't check.
+- **Prefer command evals when the check is mechanical.** "Is the output identical to the saved baseline?" is a command check whose command is `diff -q <output> <golden>` and whose check type is `exit 0` — the exit code is the result, not an `exit 0` appended to the command (never `diff … | wc -l` either: a missing golden file makes that pass), not a judgment. Reserve judgments for qualities a script can't check.
 
 ---
 
