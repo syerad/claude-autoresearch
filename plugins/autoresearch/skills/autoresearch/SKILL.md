@@ -18,7 +18,7 @@ Take any set of target files, define what "good" looks like as binary pass/fail 
 1. Mutates the target files (one change per experiment)
 2. Runs guard commands to verify nothing is broken
 3. Scores the result against all evaluators
-4. Keeps mutations that improve the score — and still do when re-measured fresh — and discards the rest
+4. Keeps mutations that improve the score — and still do when re-measured fresh and attacked by a refuter — and discards the rest
 5. Repeats until the score ceiling is hit, max iterations reached, or the user stops it
 
 **Output:** Optimized target files (on a dedicated `autoresearch/[name]` branch, worked on in a separate git worktree, for git runs) + `config.yaml` holding every setting of the run + `results.tsv` log + `changelog.md` of every mutation attempted + a live HTML dashboard. Depending on output mode, the deliverable is one winner, a shortlist of finalists, or a portfolio of distinct variants.
@@ -85,6 +85,7 @@ Constraints (must pass every run, or the change is thrown out):
      — Inferred from your good examples.
   4. Banned phrases: "game-changer", "level up", "touch base"          ?
      — Extracted from your bad examples.
+Held-out set:        none — the email itself is judged, no task set    ✓
 
 Guards:              markdown lint (markdownlint)                      ✓
 Timeout:             120s per experiment (guards + all runs)           ✓
@@ -106,15 +107,15 @@ Keep asking until every `?` is resolved. When the draft is fully ✓, move to Pa
 
 ### Pass 5 — Stress-test the evals
 
-Before setup, while the user is still here, test the evals themselves. A run can only be as good as its evals, and every flaw found now saves a run spent climbing the wrong number.
+Before setup, while the user is still here, test the evals themselves. A run can only be as good as its evals, and every flaw found now saves a run spent climbing the wrong number. (The refuter attacks the eval set at the end of setup, step 12, once the run's files exist.)
 
-1. **Calibrate every judgment eval** on the labelled examples the user gave. First write down the verdict each example should get on each eval — a good example should pass every eval; a bad example should fail the evals it was collected to illustrate — and show this small table to the user to correct. Then, for each eval and example, dispatch 3 blind judges with only the example and the question. The eval passes calibration if all 3 verdicts match the expected one on every example. On any mismatch, show the user the example, the verdicts, and the judges' reasons, propose a rewritten question, and calibrate again. After two failed rewrites, drop the eval or let the user edit it — and calibrate the user's version too: an eval that disagrees with the user's own examples optimizes toward something they don't want. No labelled examples → skip calibration and say so; the baseline (setup step 12) still checks that each judgment answers consistently.
+1. **Calibrate every judgment eval** on the labelled examples the user gave. First write down the verdict each example should get on each eval — a good example should pass every eval; a bad example should fail the evals it was collected to illustrate — and show this small table to the user to correct. Then, for each eval and example, dispatch 3 blind judges with only the example and the question. The eval passes calibration if all 3 verdicts match the expected one on every example. On any mismatch, show the user the example, the verdicts, and the judges' reasons, propose a rewritten question, and calibrate again. After two failed rewrites, drop the eval or let the user edit it — and calibrate the user's version too: an eval that disagrees with the user's own examples optimizes toward something they don't want. No labelled examples → skip calibration and say so; the baseline (setup step 13) still checks that each judgment answers consistently.
 2. **Present the results** with the final draft — calibration verdicts and any rewritten evals — and get the user's confirmation. Then move to the setup checklist below.
 
 ### Inline education rules
 
 - First mention of a concept = ≤15-word gloss. Second mention = no gloss. Tracked per session.
-- Concepts to gloss: baseline, eval, guard, mutation, rollback, score, pass rate, iteration, keep, discard, variant, diversity dimension, objective, constraint, noise margin, calibration.
+- Concepts to gloss: baseline, eval, guard, mutation, rollback, score, pass rate, iteration, keep, discard, variant, diversity dimension, objective, constraint, noise margin, held-out set, calibration, refuter, counterexample.
 - Every proposed eval has a `Grounded in:` line.
 - At every step, offer two escape hatches: *"skip this, use a default"* and *"I want to edit directly"* (drops the user into the raw configuration form below).
 
@@ -129,7 +130,7 @@ Pick a short kebab-case run name `[name]` (e.g. `nextjs-perf`, `cold-email`) —
    - **Objective** — what the run improves. Exactly one per run, of one of two kinds:
      - **metric** — a single command evaluator with a `direction` (`lower` or `higher`) instead of a `check`; its raw number is compared against the current best. Use it whenever the quality is a number: latency, runtime, bundle size, a Lighthouse score. An optional `target` value stops the run once reached. Ask the user for the smallest change that matters to them (default: the measured noise).
      - **pass-count** — the total passes of the scored checks across all runs (see "scoring"). Use it when quality is a set of yes/no properties: copy, prompts, documents.
-   - **Constraint** — a check that must pass in every run, or the candidate is discarded whatever its objective. Use it for what must not break: output identical to a golden file, required content still present, no banned phrases. Pair every metric objective with at least one correctness constraint — speed is easy if you're allowed to delete features. A constraint must be stable: one that flips on the unchanged baseline (setup step 12) would discard good changes at random.
+   - **Constraint** — a check that must pass in every run, or the candidate is discarded whatever its objective. Use it for what must not break: output identical to a golden file, required content still present, no banned phrases. Pair every metric objective with at least one correctness constraint — speed is easy if you're allowed to delete features. A constraint must be stable: one that flips on the unchanged baseline (setup step 13) would discard good changes at random.
 
    A configuration that assigns no roles — every check scored, no constraints — is a pass-count objective over all checks and behaves as runs always have.
 
@@ -140,13 +141,13 @@ Pick a short kebab-case run name `[name]` (e.g. `nextjs-perf`, `cold-email`) —
    check:     ">= 0.9"        # scored checks and constraints
    direction: higher          # metric objective, instead of check
    ```
-   Extraction formats: jq-style path for JSON (`.field.subfield`), `"field N"` for whitespace-delimited output, `"raw"` for plain numeric output. A check can also be `exit 0` with no `extract`: it passes when the command exits 0 (a missing file or crash is then a failure, not a silent pass).
+   Extraction formats: jq-style path for JSON (`.field.subfield`), `"field N"` for whitespace-delimited output, `"raw"` for plain numeric output. A check can also be `exit 0` with no `extract`: it passes when the command exits 0 (a missing file or crash is then a failure, not a silent pass) — the form constraints promoted from a refutation take.
 
    **Calibrate thresholds against the current baseline.** When the quality is a number, make it the metric objective and skip thresholds altogether. For thresholded scored checks, binary scoring is blind to sub-threshold movement: if the baseline is 0.62 and the threshold is `>= 0.9`, an improvement to 0.85 scores exactly the same as no improvement and gets discarded. Either set thresholds just beyond the current value so progress can register, or use stepped thresholds — the same command as three evaluators with `>= 0.7`, `>= 0.8`, `>= 0.9` — so each increment flips an eval.
 
    **Judgment evaluator** — a binary yes/no question, answerable from the artifact alone: no "still", "better than before", or other reference to a version the judge never sees. Three things must be pinned down at setup:
-   - **What is judged and how it is produced fresh each run.** For code: fetch the page, run the binary, read the build artifact. For skill/prompt targets: write a fixed set of 3-5 test prompts into `autoresearch-[name]/tasks/` at setup; each run executes the target against them in a fresh subagent, loading it from its path inside the worktree (`<worktree>/<path>`) — an installed or project copy of a skill, prompt, or config is the user's unedited version and would measure nothing. A judgment with no fresh artifact to inspect is ungrounded — the score would just measure the agent's optimism about its own edit.
-   - **Who judges: a fresh subagent, blind to the experiment.** Dispatch a subagent that receives ONLY the artifact, the yes/no question, and any reference file the question names (an inventory, a schema) — never the diff, the hypothesis, or the changelog. The agent that authored a mutation must not grade it; self-graded judgments say "yes" almost every time. The judge answers `PASS` or `FAIL` plus one sentence saying why; the reasons feed the next experiment's analysis.
+   - **What is judged and how it is produced fresh each run.** For code: fetch the page, run the binary, read the build artifact. For skill/prompt targets: write a fixed set of 3-5 test prompts into `autoresearch-[name]/tasks/` at setup (plus the held-out set, field 9); each run executes the target against them in a fresh subagent, loading it from its path inside the worktree (`<worktree>/<path>`) — an installed or project copy of a skill, prompt, or config is the user's unedited version and would measure nothing. A judgment with no fresh artifact to inspect is ungrounded — the score would just measure the agent's optimism about its own edit.
+   - **Who judges: a fresh subagent, blind to the experiment.** Dispatch a subagent that receives ONLY the artifact, the yes/no question, and any reference file the question names (an inventory, a schema) — never the diff, the hypothesis, or the changelog. The agent that authored a mutation must not grade it; self-graded judgments say "yes" almost every time. The judge answers `PASS` or `FAIL` plus one sentence saying why; reasons from the dev tasks feed the next experiment's analysis. Held-out judges answer `PASS` or `FAIL` only (field 9).
    - **That it agrees with the user.** Calibrated on their labelled examples in Pass 5.
 
    Both types can be mixed in a single run. Prefer command evaluators wherever the quality is mechanically checkable (a deterministic "is the output identical" check belongs in a `diff`-based command eval, not a judgment).
@@ -169,11 +170,19 @@ Pick a short kebab-case run name `[name]` (e.g. `nextjs-perf`, `cold-email`) —
 
 6. **Runs per experiment** — How many times to evaluate per mutation. Defaults to 5 if unspecified. 3 is fine for deterministic benchmarks. 5 for nondeterministic outputs (skill prompts, LLM judgments).
 
-Plus two front-door outputs:
+Plus three front-door outputs:
 
 7. **Output mode** — single-winner / top-N / exploration, per [references/output-modes.md](references/output-modes.md). Exploration additionally needs 1–3 diversity dimensions with thresholds (no dimension nameable → run top-N instead).
 
 8. **Rollback mechanism** — git / snapshot-dir / API / manual-confirm, per [references/rollback-mechanisms.md](references/rollback-mechanisms.md). One mechanism per run, covering every target.
+
+9. **Held-out set** — for targets evaluated over a set of inputs (a skill or prompt's test prompts, a benchmark's input files), set aside about a third of them — at least 2 where there are enough, otherwise 1 — in `autoresearch-[name]/holdout/`. The agent making changes must never see their contents, outputs, or judge reasons, so it never handles them:
+   - **Creation:** at setup a subagent writes the full input set (or takes the user's material), moves a random third into `holdout/`, and returns only the paths of the dev inputs.
+   - **Evaluation:** for each held-out input, a fresh subagent runs the target on it from the worktree and writes the output to `holdout/outputs/`, returning nothing but "done"; command checks run with their output redirected there, never printed. Blind judges get an output's path and the question, write `PASS` or `FAIL` to `holdout/verdicts/`, and return nothing. Then a **tally subagent** reads the verdicts and `holdout/scores.json`, records the counts there, and returns only `held` or `regressed` — the one word the main agent ever sees. Each held-out evaluation is scored like a dev evaluation — every check, runs per experiment — under its own experiment-sized timeout. `holdout/outputs/` and `holdout/verdicts/` are cleared before each held-out evaluation, and the tally subagent counts only the files that evaluation wrote — a stale verdict from an earlier evaluation never counts.
+   - **Bookkeeping:** counts, the baseline's held-out result, and the held-out noise margin live in `holdout/scores.json`, maintained by the tally subagent; `results.tsv` and the changelog record only `held` or `regressed`.
+   - **The gate:** measured at the baseline, on every candidate that survives re-measurement, and at the end. `regressed` — worse than the baseline by more than the held-out noise margin, or a constraint failing on a held-out input — discards the candidate: it got better at the visible tasks by getting worse at the job.
+
+   The agent opens `holdout/` only at delivery. Targets without an input set (one page, the email itself) have none: record `holdout: none` and why.
 
 ### scoring
 
@@ -190,7 +199,7 @@ Every check is binary — pass or fail — except a metric objective, which is a
 
 Each "run" executes all unique commands once (deduplicated), then scores all evaluators against the output. So 4 evaluators using 2 unique commands with 3 runs = 6 command executions total, 12 pass/fail scores. Max score = 12.
 
-**Noise margin** — the minimum improvement that counts, measured on the unchanged baseline at setup (step 12) and recorded in `config.yaml`:
+**Noise margin** — the minimum improvement that counts, measured on the unchanged baseline at setup (step 13) and recorded in `config.yaml`:
 - pass-count: the spread (max − min) of the three baseline totals, and at least 2 if any scored check is a judgment or otherwise non-deterministic — a +1 blip on a noisy eval is indistinguishable from variance. With only deterministic checks, any strict improvement counts (margin 1).
 - metric: the spread of the three baseline means (any strict improvement if the spread is zero, e.g. a deterministic size), or the user's minimum meaningful change if that is larger.
 
@@ -206,22 +215,23 @@ In **exploration mode**, every check is a hard constraint and there is no object
 
 Once the front-door has confirmed all fields, run these steps in order. The git mechanism is shown inline (the common case); for snapshot-dir, API, and manual-confirm the same steps dispatch to the per-mechanism operations in [references/rollback-mechanisms.md](references/rollback-mechanisms.md).
 
-1. **Confirm configuration** — all fields populated from the front-door: target files, evaluators with their roles, guards, timeout, max iterations, runs per experiment, output mode, rollback mechanism, run name. A field that breaks a rule above — a number checked against a far-off threshold, a judgment that says "still" — goes back to the user before anything else runs.
+1. **Confirm configuration** — all fields populated from the front-door: target files, evaluators with their roles, guards, timeout, max iterations, runs per experiment, output mode, rollback mechanism, held-out set, run name, and the goal in one paragraph. A field that breaks a rule above — a number checked against a far-off threshold, a judgment that says "still", a missing held-out decision — goes back to the user before anything else runs.
 2. **Safety-review guards and evaluators.** These commands run unattended, dozens of times. Refuse or explicitly confirm anything destructive or outward-facing: deletes outside the artifacts dir, `sudo`, piping downloads to a shell, benchmarks pointed at production URLs. Also check that no target file is an eval input — a test the guards or evaluators run, a golden file, a task file. A target the run may edit can't also be what measures it: split the file or drop it from the evals.
 3. **Run the rollback pre-flight** per [references/rollback-mechanisms.md](references/rollback-mechanisms.md). For git that means: resolve the target repo (`git -C <dir-of-target> rev-parse --show-toplevel` — ALL targets must resolve to the SAME repo); every target file is tracked (`git ls-files --error-unmatch <path>`) and has no uncommitted changes (abort otherwise — do NOT auto-commit the user's work; other uncommitted or untracked files don't block the run, but tell the user they aren't part of it); no collision with a previous run's tag, branch, worktree, or artifacts dir (offer resume or a new name — never overwrite a previous run's `baselines/`). If any pre-flight fails, abort with that doc's message.
 4. **Read and understand all target files.** For code: architecture, dependencies, what each file does. For writing: tone, structure, intended audience. For forecasts: assumption cells, formula chains, which cells feed the outputs the user cares about.
 5. **Create the run worktree** (git): `git -C <target repo> worktree add -b autoresearch/[name] <worktree> HEAD`, with `<worktree>` defaulting to `<parent of target repo>/<repo dir name>-autoresearch-[name]`. Every mutation, guard, and evaluator runs inside the worktree — git commands as `git -C <worktree>`, shell commands with the worktree as working directory. The user's checkout, branch, and uncommitted work are never touched, so they can keep working while the run goes.
 
     **Prepare the worktree.** It holds tracked files only — no `node_modules`, `.venv`, build caches, or ignored config like `.env`. Run the project's install step in it (`npm ci`, `uv sync`, `bundle install`, `go mod download`, …) and record those commands under `worktree_setup` in `config.yaml`, so recovery can repeat them. Install into the worktree's own environment (a `.venv` inside it, its own `node_modules`) and run guards and evaluators with that one; an editable install or `npm link` made from the user's environment points at their checkout, so every candidate would measure the unmutated code. Never copy a secret file (`.env*`, credentials) into the worktree without asking the user.
-6. **Verify guards pass** — write each guard and evaluator command into `autoresearch-[name]/commands/<name>.sh` first (step 11 describes the scripts), then run them — in the worktree (git) or on the current state (other mechanisms), each wrapped in `timeout` within one experiment's budget — the same budget each of the three baseline evaluations in step 12 gets. If any fails, stop and tell the user — the target is already broken, or (git) a guard depends on uncommitted or ignored files that are not in the worktree; say which. Then `git -C <worktree> status --porcelain --untracked-files=no` must be empty: a guard that rewrites tracked files (a formatter's `--fix`, code generation, a lockfile update) would make every experiment look like it touched non-target files — have the user switch it to its check-only form.
+6. **Verify guards pass** — write each guard and evaluator command into `autoresearch-[name]/commands/<name>.sh` first (step 11 describes the scripts), then run them — in the worktree (git) or on the current state (other mechanisms), each wrapped in `timeout` within one experiment's budget — the same budget each of the three baseline evaluations in step 13 gets. If any fails, stop and tell the user — the target is already broken, or (git) a guard depends on uncommitted or ignored files that are not in the worktree; say which. Then `git -C <worktree> status --porcelain --untracked-files=no` must be empty: a guard that rewrites tracked files (a formatter's `--fix`, code generation, a lockfile update) would make every experiment look like it touched non-target files — have the user switch it to its check-only form.
 7. **Create the artifacts directory** `autoresearch-[name]/`. Git: at the root of the user's checkout — outside the worktree, so rollbacks never touch it and it outlives the worktree — and add `/autoresearch-[name]/` to the repo's local exclude file if absent, which keeps it out of the user's `git status` without committing anything. Get its absolute path with `git -C <target repo> rev-parse --path-format=absolute --git-path info/exclude` (the plain `--git-path` form prints a path relative to the repo, not to your working directory) and `mkdir -p` its directory first. Tell the user not to run `git clean -x` in their checkout during the run: it deletes ignored directories, this one included. Remove the exclude line when the run is delivered. Other mechanisms: in the targets' common directory.
 8. **Back up all target files** to `autoresearch-[name]/baselines/`, mirroring their repo-relative paths. These are the pre-run originals — an abort escape hatch, not the rollback mechanism, and identical across all mechanisms.
 9. **Establish the rollback anchor.** Git: `git -C <worktree> tag autoresearch/[name]/good autoresearch/[name]`. Snapshot-dir: copy targets to `iterations/0000-baseline/` and `0000-good/`. API: export and record iteration 0. Manual-confirm: log the baseline and get the user's ack.
-10. **Write `autoresearch-[name]/config.yaml`** — every confirmed field and the run's bookkeeping (format below). Filling in what setup measures afterwards — checksums, noise margins, baseline values — completes revision 1 rather than changing it. It is the single source of truth for resuming: recovery reads it first, and nothing a resume needs may exist only in the conversation. Evaluator wording, commands, thresholds, guards, and the judge model are frozen once the baseline has run. Changing any of them mid-run means bumping `revision` and re-running the baseline, logged as a new `baseline` row; from then on compare only against scores measured under the new revision.
-11. **Create artifacts:** `results.tsv` (with header row), `changelog.md` (empty), `dashboard.html` (copy from [references/dashboard-template.html](references/dashboard-template.html), replace `__DATA_PLACEHOLDER__` with initial data JSON including the `mode` field), `scores.json`, and — for targets evaluated over a set of inputs — the fixed test-task set under `autoresearch-[name]/tasks/`. Save the labelled examples from Pass 5 to `autoresearch-[name]/examples/`. Write every guard and evaluator command — including the ones that produce a judgment's artifact — verbatim from `config.yaml` into its own script, `autoresearch-[name]/commands/<name>.sh`, and run it from then on as `timeout <remaining>s bash <script>` from the worktree root — no shell quoting to get wrong. Record the sha256 of every file — not directory — among the eval inputs outside the worktree (everything under `commands/`, `tasks/`, `examples/`, and any golden file kept in the artifacts directory), and re-verify them before the baseline under `eval_inputs_sha256` in `config.yaml`. Open the dashboard: `open autoresearch-[name]/dashboard.html` (macOS) / `xdg-open` (Linux).
-12. **Run the baseline** (experiment 0) — evaluate the unchanged state three times over (three full evaluations of all checks × all runs). This doubles as the noise measurement:
+10. **Write `autoresearch-[name]/config.yaml`** — every confirmed field, the goal paragraph the refuter's briefs quote, and the run's bookkeeping (format below). Filling in what setup measures afterwards — checksums, noise margins, baseline values, constraints accepted in step 12 — completes revision 1 rather than changing it. It is the single source of truth for resuming: recovery reads it first, and nothing a resume needs may exist only in the conversation. Evaluator wording, commands, thresholds, guards, and the judge model are frozen once the baseline has run. Changing any of them mid-run means bumping `revision` and re-running the baseline, logged as a new `baseline` row; from then on compare only against scores measured under the new revision. One exception: a constraint promoted from a reproduced refutation bumps `revision` without a re-baseline — it passed 3/3 on the anchor before promotion, and constraints never add to the score ([references/refutation.md](references/refutation.md)).
+11. **Create artifacts:** `results.tsv` (with header row), `changelog.md` (empty), `dashboard.html` (copy from [references/dashboard-template.html](references/dashboard-template.html), replace `__DATA_PLACEHOLDER__` with initial data JSON including the `mode` field), `scores.json`, and — for targets evaluated over a set of inputs — the fixed test-task set under `autoresearch-[name]/tasks/` and the held-out set under `autoresearch-[name]/holdout/`, created by a subagent per field 9 with opaque file names (`h1`, `h2`), so that neither a path nor a checksum key in `config.yaml` — which the agent re-reads every iteration — reveals what they cover. Save the labelled examples from Pass 5 to `autoresearch-[name]/examples/`. Write every guard and evaluator command — including the ones that produce a judgment's artifact — verbatim from `config.yaml` into its own script, `autoresearch-[name]/commands/<name>.sh`, and run it from then on as `timeout <remaining>s bash <script>` from the worktree root — no shell quoting to get wrong. Record the sha256 of every file — not directory — among the eval inputs outside the worktree (everything under `commands/`, `tasks/`, `holdout/` inputs, `examples/`, and any golden file kept in the artifacts directory), and re-verify them before the baseline under `eval_inputs_sha256` in `config.yaml`. Open the dashboard: `open autoresearch-[name]/dashboard.html` (macOS) / `xdg-open` (Linux).
+12. **Attack the evals.** Dispatch the refuter in `attack-evals` mode, per [references/refutation.md](references/refutation.md): the goal, objective, constraints, and guards from `config.yaml`, the targets in the worktree, and `tasks/` — never `holdout/`. `STATUS: HELD` → say so and continue. For every plausible exploit — an edit that would raise the score or pass the constraints while making the target worse — draft a constraint that blocks it, calibrate it on the labelled examples as in Pass 5 if it's a judgment, and present each exploit with its proposed constraint. Wait for the user's decision: this is the last step they review before the run goes autonomous. Accepted constraints go into `config.yaml` and `commands/`, with checksums.
+13. **Run the baseline** (experiment 0) — evaluate the unchanged state three times over (three full evaluations of all checks × all runs, plus the held-out set through its subagents). This doubles as the noise measurement:
     - **Per check:** stable pass, stable fail, or flips. A constraint that flips can't stay a constraint: stop before any experiment and tell the user, with the flipping verdicts and judge reasons — rewrite it to be deterministic or, in a pass-count run, move it into the score (in a metric run, rewriting is the only option). A constraint that fails every time on the unchanged baseline would discard every candidate: stop and tell the user, who can fix the target first or change the constraint. A scored check that passes every time carries no signal: report it, and drop or tighten it if the user is around; otherwise keep it — it dilutes the pass rate but can't distort a comparison.
-    - **Margins:** compute the objective's noise margin as defined in "scoring" and record it under `noise:` in `config.yaml`.
+    - **Margins:** compute the objective's noise margin as defined in "scoring" and record it under `noise:` in `config.yaml`; the held-out margin and baseline result go to `holdout/scores.json`.
     - **Baseline score:** the median of the three pass-count totals, or the mean of the three metric means. This is the anchor's stored score and the value logged in row 0.
     - **A baseline evaluation that times out** means the experiment timeout is too small for these evals: stop and ask the user to raise it — every experiment would time out the same way.
 
@@ -238,7 +248,11 @@ Written at setup step 10 and kept current: rewrite it whenever the run's setting
 
 ```yaml
 name: fast-parse
+goal: >-                          # one paragraph from the front-door; the refuter's briefs quote it
+  Make `./process testdata/large.csv` faster without changing its output
+  or degrading its progress output.
 revision: 1                       # bump on any evaluator/guard/threshold change, then re-run the baseline
+                                  # (exception: a constraint promoted from a refutation — see references/refutation.md)
 mode: single                      # single | top-n | exploration
 n: null                           # top-n / exploration: the requested N
 diversity_dimensions: []          # exploration: [{name: growth rate, threshold: "10% relative"}]
@@ -272,14 +286,18 @@ constraints:
     type: judgment
     question: "Does the progress output show a percentage, the current row count, and an ETA on every update line?"
     artifact: "stderr of ./process testdata/large.csv"
+  # promoted from a refutation, e.g.:
+  # - {name: keeps BOM handling, type: command, command: "bash /work/proc/autoresearch-fast-parse/commands/refuted-7-1.sh", check: "exit 0", origin: "refuted experiment 7"}
 judge_model: claude-opus-5-5      # the model the judges actually ran on at baseline — a resume on another model means re-baselining
 calibration:
   progress output clear: "3/3 judges gave the expected verdict on all 3 labelled examples"
+holdout: "holdout/ — 2 inputs (h1, h2); results in holdout/scores.json, never read during the loop"
 noise: {objective_margin: 0.07}
 baseline: {objective: 1.81}
 eval_inputs_sha256:               # eval inputs outside the worktree; checked before every evaluation
   commands/mean-runtime.sh: 4b1e…
   examples/progress-good-1.txt: 9f2c…
+  holdout/h1: 7d3a…              # held-out inputs appear only under opaque names
 ```
 
 A pass-count run has `objective: {kind: pass-count, checks: [...]}` listing the scored checks in the same format as constraints. Non-git runs omit `repo`, `base`, `worktree`, `run_branch`, and `anchor_tag`.
@@ -294,7 +312,7 @@ Once the baseline is reported, the loop runs autonomously. Do not pause to ask t
 
 **0. Re-read** — Read `config.yaml`, `results.tsv`, and the last 10 entries of `changelog.md`. Skip on first iteration. This keeps the run's settings and experimental context alive across context window compression.
 
-**1. Analyze** — Which evals fail most? Read the actual outputs or command results that failed, and the judges' one-line reasons. Identify the pattern: is it a formatting issue? A performance bottleneck? A missing optimization? An ambiguous instruction?
+**1. Analyze** — Which evals fail most? Read the actual outputs or command results that failed, and the judges' one-line reasons. Identify the pattern: is it a formatting issue? A performance bottleneck? A missing optimization? An ambiguous instruction? Never open `holdout/`, held-out outputs, or held-out reasons — the moment the agent making changes sees them, they stop measuring generalization.
 
 **2. Hypothesize** — Pick ONE thing to change. Do not change 5 things at once — you won't know what helped.
 
@@ -325,24 +343,28 @@ Bad mutations:
 - Budget exceeded or a command killed (exit 124) → roll back the same way, log as `timeout`, go to step 0.
 - Git: afterwards `git -C <worktree> status --porcelain --untracked-files=no` must still be empty. A guard that rewrote a tracked file would put an unmeasured change under the candidate → roll back, log `discard` ("guards modified tracked files"), go to step 0.
 
-**6. Evaluate** — First verify the eval inputs: recompute the sha256 of every file under `eval_inputs_sha256` in `config.yaml` — here and before every other evaluation in this experiment, re-measurement included. A mismatch means an eval input changed during the run — stop the run, set the dashboard `status` to `"error"`, and tell the user; scores from here on would not be comparable. Then run all evaluators × N runs, every command timeout-wrapped, tracking the remaining experiment budget. For each run: execute all unique commands once (deduplicated), then score every evaluator against the output. For judgment evaluators: produce the fresh artifact, then dispatch a blind subagent with only the artifact and the question; it returns `PASS`/`FAIL` and one sentence why. If the budget runs out mid-evaluation, treat the experiment as `timeout` (roll back, log, go to step 0). Afterwards the tracked-files check from step 5 applies again — after this and every later guard run and evaluation in the experiment, re-measurement and reproduction included: an evaluator that rewrote a tracked file means the measurement isn't of the committed candidate.
+**6. Evaluate** — First verify the eval inputs: recompute the sha256 of every file under `eval_inputs_sha256` in `config.yaml` — here and before every other evaluation in this experiment (re-measurement, held-out, reproducers). A mismatch means an eval input changed during the run — stop the run, set the dashboard `status` to `"error"`, and tell the user; scores from here on would not be comparable. Then run all evaluators × N runs, every command timeout-wrapped, tracking the remaining experiment budget. For each run: execute all unique commands once (deduplicated), then score every evaluator against the output. For judgment evaluators: produce the fresh artifact, then dispatch a blind subagent with only the artifact and the question; it returns `PASS`/`FAIL` and one sentence why. If the budget runs out mid-evaluation, treat the experiment as `timeout` (roll back, log, go to step 0). Afterwards the tracked-files check from step 5 applies again — after this and every later guard run and evaluation in the experiment, re-measurement and reproduction included: an evaluator that rewrote a tracked file means the measurement isn't of the committed candidate.
 
 **7. Decide** — by output mode:
 
 - **single-winner** — work through these in order; the first DISCARD ends the experiment (roll back to the anchor):
   1. **Constraints.** Any constraint failed in any run → **DISCARD.**
   2. **Objective.** Compare with the anchor's stored score. Improved by at least the noise margin → a would-be keep. Not worse than the anchor's stored score, and the change strictly simplifies the target files (net-negative diff) → a would-be simplification keep; note it as such in the description. Otherwise → **DISCARD.**
-  3. **Re-measure.** A would-be keep was picked on the very measurement that made it look good; keeping it on that draw ratchets noise into the anchor. Evaluate the anchor and the candidate again, fresh, constraints included: switch the target to the anchor state, run the guards (which rebuild it), evaluate; switch back to the candidate, run the guards, evaluate. For a metric objective, repeat the pair once more in alternation (anchor, candidate, anchor, candidate), so drift on the machine hits both, and compare the mean of the candidate's two fresh values with the mean of the anchor's two. Each of these evaluations gets a fresh timeout budget. Decide on the fresh numbers only: the candidate must still beat the fresh anchor by at least the margin and pass every constraint; a simplification — including an improvement that no longer shows but whose diff is net-negative — must be no worse than the fresh anchor. Otherwise → **DISCARD** ("did not hold on re-measurement"). Whatever the outcome, end back on the candidate on the run branch (git: `git -C <worktree> checkout autoresearch/[name]`) before anything else happens. Switching per mechanism: [references/rollback-mechanisms.md](references/rollback-mechanisms.md); in manual-confirm runs the user makes each switch, as for a rollback.
-  4. → **KEEP.** **Immediately advance the anchor** to the run branch's tip (git: `git -C <worktree> tag -f autoresearch/[name]/good autoresearch/[name]` — name the branch, never rely on HEAD), then log it (step 8). The anchor's stored score — the score on the latest `keep` or `baseline` row of `results.tsv` — is the candidate's fresh re-measured score, never the selection-round score. Only a KEEP or a re-baseline changes it; fresh anchor measurements taken during a discarded experiment don't. The anchor must always point at the current baseline — if the run stops right after a keep, a stale anchor makes recovery silently destroy the best result.
+  3. **Re-measure.** A would-be keep was picked on the very measurement that made it look good; keeping it on that draw ratchets noise into the anchor. Evaluate the anchor and the candidate again, fresh, constraints included: switch the target to the anchor state, confirm the switch worked (git: `git -C <worktree> rev-parse HEAD` equals the anchor commit) before running anything, run the guards (which rebuild it), evaluate; switch back to the candidate, confirm the same way, run the guards, evaluate. For a metric objective, repeat the pair once more in alternation (anchor, candidate, anchor, candidate), so drift on the machine hits both, and compare the mean of the candidate's two fresh values with the mean of the anchor's two. Each of these evaluations gets a fresh timeout budget. Decide on the fresh numbers only: the candidate must still beat the fresh anchor by at least the margin and pass every constraint; a simplification — including an improvement that no longer shows but whose diff is net-negative — must be no worse than the fresh anchor. Otherwise → **DISCARD** ("did not hold on re-measurement"). Whatever the outcome, end back on the candidate on the run branch (git: `git -C <worktree> checkout autoresearch/[name]`) before anything else happens. Switching per mechanism: [references/rollback-mechanisms.md](references/rollback-mechanisms.md); in manual-confirm runs the user makes each switch, as for a rollback.
+  4. **Held-out.** If the run has a held-out set, evaluate the candidate on it through the held-out subagents (field 9). `regressed` → **DISCARD**, logged only as "held-out regression" — never which inputs failed or why.
+  5. **Refute.** Dispatch the refuter in `gate` mode, safety-review each reproducer it returns, and reproduce the survivors 3 times against the candidate and 3 times against the anchor, each run under a fresh experiment-sized timeout and every state switch confirmed (`git -C <worktree> rev-parse HEAD` equals the intended commit) before anything runs, per [references/refutation.md](references/refutation.md). A counterexample that fails every time on the candidate and passes every time on the anchor → **REFUTED**: switch back to the run branch, roll back, log status `refuted` (step 8), and promote the counterexample to a constraint — if it passed 3/3 on the anchor and its run time fits the experiment timeout — so no later candidate can bring the regression back. One that doesn't reproduce, or fails on both, doesn't block the keep — note it in the changelog. Whatever the outcome, end back on the candidate on the run branch. Refuter output never changes a score by itself: an objection only counts once the loop has reproduced it.
+  6. → **KEEP.** **Immediately advance the anchor** to the run branch's tip (git: `git -C <worktree> tag -f autoresearch/[name]/good autoresearch/[name]` — name the branch, never rely on HEAD), then log it (step 8). The anchor's stored score — the score on the latest `keep` or `baseline` row of `results.tsv` — is the candidate's fresh re-measured score, never the selection-round score. Only a KEEP or a re-baseline changes it; fresh anchor measurements taken during a discarded experiment don't. The anchor must always point at the current baseline — if the run stops right after a keep, a stale anchor makes recovery silently destroy the best result.
 
 - **top-N:** identical to single-winner during the loop. Selection happens after the loop stops, per [references/output-modes.md](references/output-modes.md), from the per-eval results in `scores.json`.
 
 - **exploration:**
-  - All guards pass AND all evals pass — in the evaluation and again in one fresh re-evaluation — AND the candidate differs from every existing kept variant on at least one diversity dimension → **KEEP as a new variant**: record its anchor at the branch tip (git: `git -C <worktree> tag autoresearch/[name]/variant-K autoresearch/[name]`), log it, then return the targets to the base state (git: `git -C <worktree> reset --hard autoresearch/[name]/good`) so the next candidate also mutates from base.
+  - All guards pass AND all evals pass — in the evaluation and again in one fresh re-evaluation — AND the held-out subagents answer `held` (every check passes on the held-out inputs too) AND the candidate differs from every existing kept variant on at least one diversity dimension → would-be variant.
+  - The refuter gate (single-winner step 5) then runs with the base anchor as the earlier version and the diversity dimensions in its brief — a difference along a chosen dimension is the point of a variant, not a regression. A reproduced counterexample → **REFUTED**.
+  - Not refuted → **KEEP as a new variant**: record its anchor at the branch tip (git: `git -C <worktree> tag autoresearch/[name]/variant-K autoresearch/[name]`), log it (step 8), then return the targets to the base state (git: `git -C <worktree> reset --hard autoresearch/[name]/good`) so the next candidate also mutates from base. A variant kept before a later refutation promoted a constraint is re-checked against that constraint before delivery, as top-N finalists are ([references/output-modes.md](references/output-modes.md)).
   - Any eval fails OR not distinct → **DISCARD.** Roll back to the base anchor.
   - "Score improvement" is not the decision rule — validity plus distinctness is.
 
-**8. Log** — Append to `results.tsv` (exploration keeps use a `variant K — …` description); every scored row logs the experiment's latest measurement — for keeps, and for any candidate that reached re-measurement, the fresh one. Append the experiment's per-eval pass counts and objective value to `scores.json` (every mode). Update `dashboard.html` with new inline data. Append to `changelog.md` (see format below).
+**8. Log** — Append to `results.tsv` (exploration keeps use a `variant K — …` description); every scored row logs the experiment's latest measurement — for keeps, and for any candidate that reached re-measurement, the fresh one. Append the experiment's per-eval pass counts, objective value, and held-out result to `scores.json` — once per experiment, here (every mode). Update `dashboard.html` with new inline data. Append to `changelog.md` (see format below).
 
 **9. Check stop conditions:**
 
@@ -382,10 +404,10 @@ If the session ends mid-experiment (crash, disconnect, context limit):
 1. **Read `autoresearch-[name]/config.yaml`.** It holds every setting the loop needs — targets, evaluators, guards, timeout, runs, mode, rollback mechanism, worktree, tag, base branch. Resume from it, never from memory. If `config.yaml` is missing but the worktree and tag exist (setup crashed after step 5 and before step 10): the run never started — clean up completely and start setup over: `git -C <target repo> worktree remove <worktree>`, delete the tag and the branch `autoresearch/[name]`, delete `autoresearch-[name]/` (its `baselines/` are copies of unmodified files), and remove the run's line from the local exclude file. Also: if `config.yaml` exists but has no `baseline` and `results.tsv` has no `baseline` row, setup stopped before the baseline — resume it at step 11. A run started before `config.yaml` existed (skill version 1.2 or earlier) has none either:
    - Rebuild the configuration from `baselines/`, the dashboard data, and the changelog, show it to the user in the Pass 3 format with every unrecoverable field marked `?`, and get it confirmed before continuing. If any evaluator could not be recovered verbatim, re-run the baseline under the confirmed configuration before comparing scores. (Mechanism: `api-state.json` → API, `manual-snapshots.md` → manual-confirm, `iterations/` → snapshot-dir, otherwise git.)
    - Git: such a run worked in place — its run branch is checked out in the user's own checkout. Never reset that checkout. Tell the user, and offer to continue once they have switched their checkout back to their own branch (committing or stashing their work is their call); then attach a worktree to `autoresearch/[name]` and continue under these rules.
-   - Migrate `results.tsv`: if its header lacks `objective`, keep a copy as `results.tsv.bak`, then append the empty `objective` column to its header and every existing row, so new rows line up.
+   - Migrate `results.tsv` (idempotent — nothing to do when the header already has both columns): if its header lacks `holdout` or `objective`, first keep a copy as `results.tsv.bak` (never overwrite an existing one), then add the missing empty fields to the header and every existing row — `holdout` before `objective`, `objective` last (append both if neither exists) — so new rows line up.
 2. **Return to the anchor.** Git:
    - If the worktree directory is missing, clear only its stale entry — `git -C <target repo> worktree remove <worktree>` (not `worktree prune`, which acts on every worktree of the repo) — re-attach it with `git -C <target repo> worktree add <worktree> autoresearch/[name]`, and re-run the `worktree_setup` commands.
-   - If the worktree is on a detached HEAD — the crash came mid re-measurement — check out the run branch first (`git -C <worktree> checkout autoresearch/[name]`; if a modified tracked file blocks the checkout, `git -C <worktree> reset --hard` on the detached state first).
+   - If the worktree is on a detached HEAD — the crash came mid re-measurement or refutation — check out the run branch first (`git -C <worktree> checkout autoresearch/[name]`; if a modified tracked file blocks the checkout, `git -C <worktree> reset --hard` on the detached state first).
    - A crash between moving the anchor tag and logging a keep leaves the tag one commit ahead of the log. The tag always wins — never move it backwards. If the tag's commit isn't the one the latest `keep` row was logged for (none yet → `base.commit`), the keep was decided but never logged: re-run the baseline on the anchor and log it as a new `baseline` row, which is also the stored score from then on. Exploration: the `good` tag stays on the base commit by design, and each kept variant has its own `variant-K` tag; a `variant-K` tag with no log row is logged the same way, and the branch is reset to `good`.
    - Check that the session's model matches `judge_model`; if not, re-run the baseline before comparing judgment scores.
    - Then compare the worktree with the anchor including commits: if `git -C <worktree> rev-parse HEAD` differs from `git -C <worktree> rev-parse autoresearch/[name]/good`, or `git -C <worktree> status --porcelain --untracked-files=no` is non-empty, run `git -C <worktree> reset --hard autoresearch/[name]/good` (after the checks in "Reset only the run's own copy"). A clean working tree is not enough — the interrupted experiment's mutation is usually already committed. Other mechanisms: their "Resume after crash" in [references/rollback-mechanisms.md](references/rollback-mechanisms.md). Because the anchor advances on every KEEP, this restores the latest kept state and never loses kept work.
@@ -401,17 +423,18 @@ If the session ends mid-experiment (crash, disconnect, context limit):
 After every experiment (kept or discarded), append to `changelog.md`:
 
 ```markdown
-## Experiment [N] — [baseline/keep/discard/guard_fail/timeout/interrupted]
+## Experiment [N] — [baseline/keep/discard/refuted/guard_fail/timeout/interrupted]
 
 **Score:** [X]/[max] ([percent]%), or the objective value for metric runs  (or "not scored" for guard_fail/timeout)
 **Change:** [One sentence describing what was changed]
 **Reasoning:** [Why this change was expected to help]
 **Result:** [What actually happened — which evals improved/declined, any constraint that failed]
-**Re-measured:** [Fresh anchor vs fresh candidate, if the experiment got that far]
+**Re-measured:** [Fresh anchor vs fresh candidate, if the experiment got that far; held-out: pass/fail only]
+**Refuter:** [Held, or each counterexample with its verdict — reproduced / pre-existing / not reproduced]
 **Failing outputs:** [Brief description of what still fails, with the judges' reasons, if anything — dev tasks only]
 ```
 
-This changelog is the most valuable artifact. It's a research log that persists WHY things worked or failed. The agent re-reads the last 10 entries at the start of each loop iteration. Keep descriptions free of tabs and newlines — they also go into `results.tsv`.
+This changelog is the most valuable artifact. It's a research log that persists WHY things worked or failed. The agent re-reads the last 10 entries at the start of each loop iteration — which is why nothing about held-out tasks beyond pass/fail may ever be written into it. Keep descriptions free of tabs and newlines — they also go into `results.tsv`.
 
 ---
 
@@ -425,9 +448,11 @@ autoresearch-[name]/
 ├── dashboard.html          # live browser dashboard (auto-refreshes, data inlined)
 ├── results.tsv             # score log for every experiment
 ├── changelog.md            # mutation log with reasoning (WHY things worked/failed)
-├── scores.json             # per-eval pass counts and objective value per experiment
+├── scores.json             # per-eval pass counts, objective value, held-out result per experiment
 ├── tasks/                  # fixed test inputs for the evals (targets evaluated over an input set)
+├── holdout/                # held-out inputs — never read by the agent making changes
 ├── examples/               # the user's labelled examples, used to calibrate the judges
+├── refutations/            # reproduced counterexamples, promoted to constraints; pre-existing.md
 ├── iterations/             # snapshot-dir mechanism only (see rollback-mechanisms.md)
 └── baselines/              # original target files before any changes (abort escape hatch)
     └── [mirrored paths]    # repo-relative paths, mirrored
@@ -477,14 +502,14 @@ For metric runs, leave `baseline_score`, `best_score`, `score`, `max_score`, and
 
 ### results.tsv
 
-Tab-separated with columns: experiment, score, max_score, pass_rate, status, description, objective (the newest column goes last, so older readers and scripts keep working). A row may end before `objective` — a missing trailing field means empty.
+Tab-separated with columns: experiment, score, max_score, pass_rate, status, description, holdout, objective (`objective` stays last, so older readers and scripts keep working). A row may end before `holdout` or `objective` — a missing trailing field means empty.
 
-`score`/`max_score`/`pass_rate` carry a pass-count objective; `objective` carries a metric objective's value (leave whichever doesn't apply empty).
+`score`/`max_score`/`pass_rate` carry a pass-count objective; `objective` carries a metric objective's value (leave whichever doesn't apply empty). `holdout` is `held` or `regressed` where the held-out gate ran (candidates that survived re-measurement), `measured` on baseline rows, else empty — never counts or reasons, since the agent re-reads this file every iteration. This Lighthouse run has no held-out set, so its rows end at the description.
 
-Status values: `baseline`, `keep`, `discard`, `guard_fail`, `timeout`. Guard failures and timeouts were never scored — leave their score, max_score, pass_rate, and objective fields empty. Exploration keeps prefix the description with `variant K —`.
+Status values: `baseline`, `keep`, `discard`, `refuted` (better by every measure, but a refuter's counterexample reproduced), `guard_fail`, `timeout`. Guard failures and timeouts were never scored — leave their score, max_score, pass_rate, and objective fields empty. Exploration keeps prefix the description with `variant K —`.
 
 ```
-experiment	score	max_score	pass_rate	status	description	objective
+experiment	score	max_score	pass_rate	status	description	holdout	objective
 0	3	9	33.3%	baseline	original code — no changes
 1	4	9	44.4%	keep	dynamic import for Hero component
 2	4	9	44.4%	discard	added priority to hero image — no change
@@ -500,13 +525,14 @@ experiment	score	max_score	pass_rate	status	description	objective
 
 When the loop stops (max iterations, ceiling hit, variants found, or user interrupts), present:
 
-1. **Score summary:** Baseline score → Final score (% improvement), or baseline → final objective value for metric runs. Exploration: variants found of N requested.
-2. **Total experiments run:** kept / discarded (and how many of those failed only on re-measurement) / guard failures / timeouts
+1. **Score summary:** Baseline score → Final score (% improvement), or baseline → final objective value for metric runs. Held-out: baseline → final, re-measured once more at the end. Exploration: variants found of N requested.
+2. **Total experiments run:** kept / discarded (and how many of those failed only on re-measurement or held-out) / guard failures / timeouts
 3. **Top 3 most impactful changes** (from the changelog)
 4. **Remaining failure patterns** (what still fails, if anything)
 5. **Mode-specific deliverable:** top-N — the finalist table (per-eval score vectors from `scores.json`) and the "which one?" prompt; exploration — the variant gallery with per-variant "what's different" summaries. See [references/output-modes.md](references/output-modes.md) for selection and materialization mechanics.
 6. **Location of all artifacts**
-7. **Integration (git):** the optimized state lives on the `autoresearch/[name]` branch, checked out in the worktree. After any finalist/variant selection is materialized (the variant tags are what materialization restores from — don't delete them before the user has picked), delete the `autoresearch/[name]/good` tag — and, for top-N and single-winner runs, any `variant-K` tags; in exploration the `variant-K` tags are the only references to the variants, so keep them until the user has said which to keep or discard — then offer the user: squash-merge into the `base` branch recorded in `config.yaml` (the one place the run commits to the user's checkout, and only when they say yes; a run that came from a 1.2 install also carries its `.gitignore` commit — drop it from the merge), push and open a PR, or leave the branch for review. Never merge without asking. Offer the merge only if the user's checkout is on `base.branch` with nothing staged or modified — otherwise (including a run that started from a detached commit) offer the PR or the branch, and never checkout, stash, or reset in their checkout to make a merge possible. Once they have decided, remove the worktree (`git -C <target repo> worktree remove <worktree>` — the branch keeps every commit), unless they want to inspect it first. If it refuses because of untracked or modified files, never add `--force`: show `git -C <worktree> status` and ask the user.
+7. **Final refutation:** dispatch the refuter in `final` mode on the diff from the run's base to the final state (for top-N and exploration: the state the user picked, once materialized), reproduce its counterexamples against both — switching state, confirming the switch worked (`git -C <worktree> rev-parse HEAD` equals the intended commit), and re-running the guards so each version is rebuilt — and report any reproduced regression before the integration offer, with a recommendation not to merge until it's fixed — never revert on your own. List the pre-existing findings separately. If the user has a review agent of their own, offer to run it on the run branch too. See [references/refutation.md](references/refutation.md).
+8. **Integration (git):** the optimized state lives on the `autoresearch/[name]` branch, checked out in the worktree. After any finalist/variant selection is materialized (the variant tags are what materialization restores from — don't delete them before the user has picked), delete the `autoresearch/[name]/good` tag — and, for top-N and single-winner runs, any `variant-K` tags; in exploration the `variant-K` tags are the only references to the variants, so keep them until the user has said which to keep or discard — then offer the user: squash-merge into the `base` branch recorded in `config.yaml` (the one place the run commits to the user's checkout, and only when they say yes; a run that came from a 1.2 install also carries its `.gitignore` commit — drop it from the merge), push and open a PR, or leave the branch for review. Never merge without asking. Offer the merge only if the user's checkout is on `base.branch` with nothing staged or modified — otherwise (including a run that started from a detached commit) offer the PR or the branch, and never checkout, stash, or reset in their checkout to make a merge possible. Once they have decided, remove the worktree (`git -C <target repo> worktree remove <worktree>` — the branch keeps every commit), unless they want to inspect it first. If it refuses because of untracked or modified files, never add `--force`: show `git -C <worktree> status` and ask the user.
 
 ---
 
@@ -525,6 +551,7 @@ When the loop stops (max iterations, ceiling hit, variants found, or user interr
   - command: `du -sk .next | cut -f1` / extract: `raw` / check: `< 5120` (kilobytes — `du -sk` is portable; GNU-only `du -sb` is not)
 - Constraint:
   - judgment: "Does the page display every section listed in `tasks/sections.md`, with its buttons, forms, and links responding?" (the section inventory is written at setup; a blind subagent fetches the page each run and answers against it)
+- Held-out set: none — the run measures a single page
 - Timeout: 300s (build ~60s + 3 Lighthouse runs at ~60s each)
 - Max iterations: 20
 - Runs: 3
@@ -604,6 +631,7 @@ Note: `hey` has no JSON output mode — parse its text summary (`Average:` line,
   - command: `diff -q <(./process testdata/large.csv) testdata/large.golden` / check: `exit 0` (output identical to the saved baseline; a missing golden file makes `diff` exit non-zero, so it fails loudly — a `diff … | wc -l` form would pass on a missing file)
   - command: `/usr/bin/time -l ./process testdata/large.csv 2>&1 | awk '/maximum resident/{print $1}'` / extract: `raw` / check: `< 104857600` (macOS; on Linux use `/usr/bin/time -v`, the `Maximum resident set size (kbytes)` line, and a threshold of `102400`)
   - judgment: "Does the progress output show a percentage, the current row count, and an ETA on every update line?"
+- Held-out set: two more inputs with different shapes and their own golden files, supplied by the user and placed in `holdout/` by a subagent, so the agent making changes never sees it; held-out subagents time and diff it at the baseline, on candidates that survive re-measurement, and at the end — they catch a parser tuned to the quirks of `large.csv`
 - Timeout: 300s
 - Max iterations: 20
 - Runs: 5
@@ -684,10 +712,11 @@ A good autoresearch run:
 8. **Resumable** — every setting lived in `config.yaml`, not only in the conversation
 9. **Judged blind** — no judgment eval was graded by the agent that authored the mutation
 10. **Re-measured every keep** — no change was kept on the draw that selected it
-11. **Kept the evals out of reach** — no mutation touched a test, golden file, task, or anything else outside the targets
-12. **Improved the score** — measurable improvement from baseline to final (or, in exploration mode, delivered N genuinely distinct valid variants)
-13. **Didn't overfit** — the target got better at the actual job, not just at passing evals
-14. **Ran autonomously** — didn't stop to ask permission between experiments
-15. **Re-read the changelog** — didn't repeat failed experiments or forget what worked
+11. **Survived a refuter** — the evals were attacked before the run, every keep was attacked before it landed, and the final result before it was offered for merge
+12. **Kept the evals out of reach** — no mutation touched a test, golden file, task, held-out input, or anything else outside the targets
+13. **Improved the score** — measurable improvement from baseline to final (or, in exploration mode, delivered N genuinely distinct valid variants)
+14. **Didn't overfit** — the target got better at the actual job, not just at passing evals, and the held-out set it never saw didn't get worse
+15. **Ran autonomously** — didn't stop to ask permission between experiments
+16. **Re-read the changelog** — didn't repeat failed experiments or forget what worked
 
 If the target "passes" all evals but actual quality hasn't improved — the evals are bad. Go back and write better evals.

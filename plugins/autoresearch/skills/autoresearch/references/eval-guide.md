@@ -43,7 +43,7 @@ A judgment eval is only as reliable as the judge's independence. The agent that 
 
 - **Judge blind.** Dispatch a fresh subagent that receives only the artifact (the rendered page, the generated diagram, the command output) and the yes/no question. Never include the diff, the hypothesis, or the changelog.
 - **Ask a question the artifact alone can answer.** "Is the progress output still clear?" needs the old output the judge never sees; "Does every progress line show a percentage, a row count, and an ETA?" doesn't. If a judgment needs a reference — a section inventory, a required-fields list — write it into the artifacts directory at setup and give it to the judge alongside the artifact.
-- **Get a reason with every verdict.** The judge answers `PASS` or `FAIL` and one sentence why. The reasons are the best feedback the agent making changes gets about *why* something fails. Blindness is about what the judge sees, not about what happens to its answer.
+- **Get a reason with every verdict.** The judge answers `PASS` or `FAIL` and one sentence why. The reasons are the best feedback the agent making changes gets about *why* something fails — give it the dev-task reasons, never the held-out ones. Blindness is about what the judge sees, not about what happens to its answer.
 - **Ground the judgment in a fresh artifact.** Every run must produce the thing being judged — execute the skill against a fixed test-prompt set, fetch the page, run the binary. A judgment with nothing fresh to inspect measures optimism, not quality.
 - **Prefer command evals when the check is mechanical.** "Is the output identical to the saved baseline?" is a `diff -q … ; exit 0` command check (never `diff … | wc -l`: a missing golden file makes that pass), not a judgment. Reserve judgments for qualities a script can't check.
 
@@ -73,6 +73,12 @@ Measuring once is still not enough for a keep: the candidate that scored highest
 
 ---
 
+## held-out tasks
+
+When the target is evaluated over a set of inputs — test prompts, benchmark files — set aside about a third, at least 2, that the agent making changes never sees: not the inputs, not the outputs, not the judges' reasons. Instructions alone don't achieve that — whatever a subagent returns lands in the dispatching agent's context — so the separation is structural: a subagent creates the held-out set, subagents run the target on it and write outputs to files, judges read those files and write bare verdicts to files, and a tally subagent compares against the baseline and returns only `held` or `regressed` — the only held-out word that reaches the agent or the logs it re-reads. Score them at the baseline, on every candidate that survives re-measurement, and at the end. A candidate that gains on the visible tasks while doing worse on the held-out ones is memorizing the exam, and is discarded.
+
+---
+
 ## keeping evals out of reach
 
 An eval only measures the target while nothing else changes. Agents under pressure to raise a number will, sooner or later, edit the test, the golden file, or the benchmark instead of the code. So:
@@ -80,7 +86,7 @@ An eval only measures the target while nothing else changes. Agents under pressu
 - Target files and eval inputs never overlap. If a test file is both, the run can't measure it — split it or drop it from the evals.
 - After every mutation commit, the worktree's `git status --porcelain` must match what it was before the edit; anything else touched means the mutation is discarded. After the guards and after evaluation, no tracked file may have changed either — a guard or evaluator that rewrites files would put an unmeasured change under the candidate.
 - Guard and evaluator commands live in checksummed scripts under `commands/`, so a mutation can't change what measures it.
-- Eval inputs outside the worktree (`tasks/`, `examples/`) are checksummed at setup and verified before every evaluation.
+- Eval inputs outside the worktree (`tasks/`, `holdout/`, `examples/`) are checksummed at setup and verified before every evaluation.
 
 ---
 
@@ -179,6 +185,11 @@ If eval 1 is "Is the text grammatically correct?" and eval 4 is "Are there any s
 "Would a human find this engaging?" — an agent can't reliably answer this. It'll say "yes" almost every time.
 
 **Fix:** Translate subjective qualities into observable signals. "Engaging" might mean: "Does the first sentence contain a specific claim, story, or question (not a generic statement)?"
+
+### 5. Gameable evals
+An eval the target can pass without getting better will be passed that way, given enough experiments — by special-casing the test input, detecting the benchmark, or deleting the feature the eval doesn't look at.
+
+**Fix:** before the run, a refuter attacks the eval set and proposes edits that fool it; block each plausible one with a constraint. See [refutation.md](refutation.md).
 
 ---
 

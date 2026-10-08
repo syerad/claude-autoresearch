@@ -26,7 +26,7 @@ The autoresearch loop supports three output modes. The front-door proposes one d
 
 **Loop behavior:** unchanged during iteration — same mutate/guard/evaluate/keep-or-discard loop. Difference is only at the end.
 
-**Selection needs per-eval data.** The total score in `results.tsv` is not enough to compute domination. Every evaluated experiment, in every mode, appends its per-eval pass counts, and objective value (metric runs) to `autoresearch-[name]/scores.json`. For kept experiments these are the fresh re-measured numbers, not the selection-round ones:
+**Selection needs per-eval data.** The total score in `results.tsv` is not enough to compute domination. Every evaluated experiment, in every mode, appends its per-eval pass counts, objective value (metric runs), and held-out result to `autoresearch-[name]/scores.json`. For kept experiments these are the fresh re-measured numbers, not the selection-round ones:
 
 ```json
 {
@@ -34,14 +34,14 @@ The autoresearch loop supports three output modes. The front-door proposes one d
     {"id": 1, "status": "keep", "commit": "abc1234",
      "per_eval": {"Opening specificity": 5, "Single concrete ask": 4},
      "constraints": {"Length 40-80w": 5, "No banned phrases": 5},
-     "objective": null}
+     "objective": null, "holdout": null}
   ]
 }
 ```
 
 **Selection at end of loop:**
 
-1. Take all kept experiments from `scores.json`. Every one of them passed every constraint, so constraints play no part in selection.
+1. Take all kept experiments from `scores.json`. Each passed every constraint in force when it was kept; a constraint promoted from a refutation later on was never checked against the earlier ones. Before selection, check every candidate finalist against the constraints added after its keep (switch to it, run the guards, evaluate those constraints) and drop any that fail.
 2. **Pass-count objective:** filter to the **non-dominated** set over the scored checks: variant A dominates B iff for all scored checks E, per_eval_A(E) >= per_eval_B(E) and for some E*, per_eval_A(E*) > per_eval_B(E*). Keep every variant nothing dominates. If > N remain, rank by total pass-rate and take the top N. **Metric objective:** there is one number per experiment, so take the N kept experiments with the best objective value (direction-aware).
 3. If < N, return what was found.
 
@@ -68,6 +68,7 @@ The autoresearch loop supports three output modes. The front-door proposes one d
   3. **Differs from every existing kept variant on at least one diversity dimension.**
 - **On KEEP (git):** tag the commit `autoresearch/[name]/variant-K`, then `reset --hard` back to the base anchor before the next candidate. (Other mechanisms: see rollback-mechanisms.md "Interaction with output modes".)
 - **On DISCARD:** roll back to the base anchor as usual.
+- **Later constraints.** A variant kept before a constraint was promoted from a refutation is re-checked against it before delivery, as top-N finalists are (switch to its `variant-K` tag, run the guards, evaluate the constraint); one that fails is dropped and no longer counts toward N.
 
 **The baseline counts.** The baseline is variant `base` — it must pass all evals at setup (abort the run if it doesn't; exploration requires a valid starting point), and it counts toward N. "N=3" means the base plus two new kept variants, unless the user explicitly asks for N new variants.
 

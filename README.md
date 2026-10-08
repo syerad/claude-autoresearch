@@ -36,6 +36,7 @@ From your answer it infers a full draft configuration (target files, evals groun
 4. **Timeout** — max seconds per experiment, covering guards plus all evaluation runs
 5. **Max iterations** — experiment budget
 6. **Runs per experiment** — evaluations per mutation (defaults to 5)
+7. **Held-out set** — for prompts and benchmarks judged over a set of inputs, about a third are kept back where the agent making changes never sees them, to catch overfitting
 
 Plus an **output mode**, picked to match your goal:
 
@@ -43,7 +44,7 @@ Plus an **output mode**, picked to match your goal:
 - `top-N` — 2–3 strong finalists, side by side, and you pick. Want this when taste matters and you asked for options: marketing copy, microcopy, email templates.
 - `exploration` — a portfolio of distinct valid variants instead of one winner. Want this when "best" is the wrong question: bull/base/bear forecasts, pricing scenarios, strategy directions.
 
-Before the run starts, judgment evals are calibrated on your own good and bad examples — an eval that disagrees with you is rewritten before it can steer the run.
+Before the run starts, judgment evals are calibrated on your own good and bad examples — an eval that disagrees with you is rewritten before it can steer the run — and a refuter attacks the eval set, looking for edits that would raise the score while making the target worse. At the end, the refuter attacks the final result once more before anything is offered for merge.
 
 And a **rollback mechanism** — git for files in a repository, a snapshot directory for binaries or files outside version control, API snapshot for live systems with export/restore, or manual-confirm as a last resort. Targets that can't be undone at all (sent emails, payments) are refused.
 
@@ -53,7 +54,7 @@ And a **rollback mechanism** — git for files in a repository, a snapshot direc
 2. **Mutate** — make ONE targeted change to the target files, and nothing else: a mutation that touches a test, a golden file, or any other non-target file is thrown out
 3. **Guard** — verify nothing is broken (build passes, tests pass, site responds)
 4. **Evaluate** — every constraint must pass; the objective is scored against the current best
-5. **Decide** — better by at least the noise margin, or no worse but strictly simpler? Then re-measure the candidate and the current best side by side, fresh — a change is kept only if the win holds. Anything else is discarded and rolled back
+5. **Decide** — better by at least the noise margin, or no worse but strictly simpler? Then re-measure the candidate and the current best side by side, fresh, check the held-out set, and let a refuter try to break the change — a change is kept only if the win holds and no counterexample reproduces. A counterexample that does reproduce becomes a new constraint for the rest of the run. Anything else is discarded and rolled back
 6. **Repeat** — autonomous loop until the user stops it, max iterations are reached, a numeric target is met, or the score is within one pass of perfect and 3 consecutive experiments fail to improve it
 
 Git runs happen in a separate git worktree on a dedicated `autoresearch/[name]` branch — your checkout and branch are never touched, so you can keep working while it runs (non-git targets are protected by their snapshot mechanism instead). Every setting is saved to `config.yaml` in the run's artifacts directory, so a crashed or interrupted run resumes exactly where it left off. Failed experiments are rolled back via a per-run tag that advances on every kept improvement. When the run finishes, the result stays on the run branch and autoresearch offers to squash-merge, open a PR, or leave it for review — it never merges into your branch without asking. A live HTML dashboard tracks progress.
